@@ -1,0 +1,66 @@
+# SPICE Kernel Configuration
+# Time bounds are stored as UTC ISO format strings [start, end]
+# File paths are relative to spice-tools/kernels/
+
+[base_kernels]
+kernels = [
+    { file = "lsk/naif0012.tls" }, # Leap seconds kernel 
+
+    { file = "pck/cpck_rock_21Jan2011.tpc" },
+    { file = "pck/gm_de440.tpc" },
+    { file = "pck/juice_jup012.tpc" },
+    { file = "pck/moon_pa_de440_200625.bpc"},
+    { file = "pck/de403_masses.tpc" },
+    { file = "pck/nh_pcnh_006.tpc"},
+    { file = "pck/pck00011.tpc" } 
+]
+
+[groups.inner_solar_system]
+name = "Inner Solar System"
+kernels = [
+    { file = "spk/planets/de442.bsp", time_bounds = ["1549-12-30T23:59:19Z", "2650-01-24T23:58:51Z"], ids = [[1, 10], [199, 199], [299, 299], [301, 301], [399, 399]] },
+    { file = "spk/satellites/mar099.bsp", time_bounds = ["1599-12-31T23:59:19Z", "2600-01-01T23:58:51Z"], ids = [[3, 4], [10, 10], [399, 399], [401, 402], [499, 499]] },
+]
+
+[groups.jupiter]
+name = "Jupiter"
+kernels = [
+    { file = "spk/satellites/jup365.bsp", time_bounds = ["1600-01-09T23:59:19Z", "2200-01-09T23:58:51Z"], ids = [[3, 3], [5, 5], [10, 10], [399, 399], [501, 505], [514, 516], [599, 599]] },
+    { file = "spk/satellites/jup347.bsp", time_bounds = ["1799-12-20T23:59:19Z", "2200-01-09T23:58:51Z"], ids = [[3, 3], [5, 5], [10, 10], [399, 399], [506, 513], [517, 572], [599, 599], [55501, 55526]] },
+    { file = "spk/satellites/jup348.bsp", time_bounds = ["1799-01-15T23:59:19Z", "2199-12-14T23:58:51Z"], ids = [[3, 3], [5, 5], [10, 10], [399, 399], [599, 599], [55527, 55530]] },
+    { file = "spk/satellites/jup349.bsp", time_bounds = ["1799-01-15T23:59:19Z", "2199-12-14T23:58:51Z"], ids = [[3, 3], [5, 5], [10, 10], [399, 399], [599, 599], [55531, 55544]] },
+]
+
+[groups.saturn]
+name = "Saturn"
+kernels = [
+    { file = "spk/satellites/sat393_daphnis.bsp", time_bounds = ["1949-12-25T23:59:19Z", "2050-01-09T23:58:51Z"], ids = [[635, 635]] },
+    { file = "spk/satellites/sat415.bsp", time_bounds = ["1949-12-25T23:59:19Z", "2050-01-09T23:58:51Z"], ids = [[3, 3], [6, 6], [10, 10], [399, 399], [610, 611], [615, 618], [632, 633], [649, 649], [653, 653], [699, 699]] },
+    { file = "spk/satellites/sat441.bsp", time_bounds = ["1749-12-29T23:59:19Z", "2250-01-05T23:58:51Z"], ids = [[3, 3], [6, 6], [10, 10], [399, 399], [601, 609], [612, 614], [632, 632], [634, 634], [699, 699]] },
+    { file = "spk/satellites/sat441xl_part-2.bsp", time_bounds = ["2014-09-27T23:58:53Z", "4500-01-17T23:58:51Z"], ids = [[601, 609], [612, 612], [699, 699]] },
+    { file = "spk/satellites/sat455.bsp", time_bounds = ["1750-01-14T23:59:19Z", "2150-01-04T23:58:51Z"], ids = [[3, 3], [6, 6], [10, 10], [399, 399], [699, 699], [65158, 65285]] },
+    { file = "spk/satellites/sat456.bsp", time_bounds = ["1749-12-29T23:59:19Z", "2150-01-07T23:58:51Z"], ids = [[3, 3], [6, 6], [10, 10], [399, 399], [619, 631], [636, 648], [650, 652], [654, 666], [699, 699]] },
+    { file = "spk/satellites/sat457.bsp", time_bounds = ["1749-12-31T23:59:19Z", "2150-01-09T23:58:51Z"], ids = [[3, 3], [6, 6], [10, 10], [399, 399], [699, 699], [65067, 65067], [65070, 65070], [65077, 65077], [65079, 65079], [65081, 65082], [65084, 65098], [65100, 65157]] },
+    { file = "spk/satellites/sat459.bsp", time_bounds = ["1749-12-26T23:59:19Z", "2150-01-04T23:58:51Z"], ids = [[3, 3], [6, 6], [10, 10], [399, 399], [699, 699], [65286, 65303]] },
+]
+
+[groups.uranus]
+name = "Uranus"
+kernels = [
+    { file = "spk/satellites/ura184_part-1.bsp", time_bounds = ["1899-12-31T23:59:19Z", "2100-01-23T23:58:51Z"], ids = [[3, 3], [7, 7], [10, 10], [399, 399], [706, 712], [799, 799]] },
+    { file = "spk/satellites/ura184_part-2.bsp", time_bounds = ["1899-12-31T23:59:19Z", "2100-01-23T23:58:51Z"], ids = [[3, 3], [7, 7], [10, 10], [399, 399], [713, 715], [725, 727], [799, 799], [75052, 75052]] },
+    { file = "spk/satellites/ura184_part-3.bsp", time_bounds = ["1600-01-03T23:59:19Z", "2399-12-16T23:58:51Z"], ids = [[3, 3], [7, 7], [10, 10], [399, 399], [701, 705], [716, 724], [799, 799], [75051, 75051]] },
+]
+
+[groups.neptune]
+name = "Neptune"
+kernels = [
+    { file = "spk/satellites/nep095.bsp", time_bounds = ["1900-01-01T00:00:00Z", "2050-01-01T00:00:00Z"], ids = [[3, 3], [8, 8], [10, 10], [399, 399], [801, 808], [814, 814], [899, 899]] },
+    { file = "spk/satellites/nep104.bsp", time_bounds = ["1600-01-03T23:59:19Z", "2399-12-24T23:58:51Z"], ids = [[3, 3], [8, 8], [10, 10], [399, 399], [809, 813], [899, 899], [85051, 85052]] },
+]
+
+[groups.pluto]
+name = "Pluto"
+kernels = [
+    { file = "spk/satellites/plu060.bsp", time_bounds = ["1800-01-01T23:59:19Z", "2199-12-29T23:58:51Z"], ids = [[3, 3], [9, 10], [399, 399], [901, 905], [999, 999]] },
+]

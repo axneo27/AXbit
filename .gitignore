@@ -1,0 +1,39 @@
+# Rust build artifacts
+/target/
+
+# C/C++ build artifacts
+*.o
+*.out
+
+# SPICE Toolkit library and kernels
+# These are large and should be downloaded separately as per SPICE best practices.
+/spice-tools/cspice/
+/spice-tools/cspice.tar
+/spice-tools/kernels/
+
+# High res texture files
+/src/modules/projection_3d/res/env_map
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Editor-specific files
+.vscode/
+.idea/
+
+# Log files
+*.log
+
+# Environment variables
+.env
+
+# Local data directory
+/data/

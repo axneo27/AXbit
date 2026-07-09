@@ -1,0 +1,93 @@
+name: Bug report
+description: Something in AXbit isn't working the way it should
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what actually happened instead?
+      placeholder: |
+        Loaded the jupiter kernel group and simulated a trajectory past Europa.
+        Expected the integrator to switch to Dop853 on approach; it stayed on WHFast and the orbit diverged.
+    validations:
+      required: true
+  - type: textarea
+    id: repro-steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps someone else could follow to see the same thing.
+      placeholder: |
+        1. Load kernel group `jupiter`
+        2. Propagate body X from epoch Y to epoch Z
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does this live?
+      description: Pick the part of AXbit this is most related to, if you know.
+      options:
+        - Integrator / force models
+        - Simulation / uncertainty analysis
+        - SPICE / SBDB / kernels / reference frames
+        - Rendering / graphics
+        - UI / interaction
+        - Build / platform support
+        - Performance
+        - Something else / not sure
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error output
+      description: Paste any error output, stack trace, or SPICE error here. Rendered as a code block automatically.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots, data, or comparison
+      description: Anything that makes the problem visible or measurable. You can drag files into this field.
+    validations:
+      required: false
+  - type: input
+    id: commit
+    attributes:
+      label: Commit hash
+      description: There are no tagged releases yet — give the commit hash you built from (`git rev-parse HEAD` or the short hash from `git log`).
+      placeholder: e.g. abc1234
+    validations:
+      required: true
+  - type: input
+    id: kernels
+    attributes:
+      label: Kernel groups loaded
+      description: Which groups from kernels.toml were active when this happened, if relevant.
+      placeholder: e.g. inner_solar_system, jupiter
+    validations:
+      required: false
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other / not sure
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and didn't find a duplicate
+          required: true
+        - label: I'm using kernels from a supported/known source, not a hand-edited or unofficial kernel
+          required: true

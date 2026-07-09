@@ -1,0 +1,64 @@
+name: Feature or research proposal
+description: Propose a capability, numerical method, analysis tool, or visual improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the use case first. A design is welcome, but easier to judge once the problem is clear.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the task, question, or limitation rather than only naming a feature.
+      placeholder: |
+        I want to simulate a body with eccentricity > 1 (a hyperbolic flyby), but the current
+        renderer only draws elliptical orbits, so I can't visualize the trajectory.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Main area
+      options:
+        - Integrator / force models
+        - Simulation / uncertainty / Monte Carlo
+        - Validation / accuracy
+        - SPICE / SBDB / kernels / reference frames
+        - Rendering / graphics
+        - UI / workflow
+        - Performance
+        - Documentation / examples
+        - Build / platform support
+        - Something else / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: If you have an approach in mind, describe its behavior and boundaries. Equations, papers, data sources, or sketches welcome but not required.
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Workarounds you're using, or other approaches you thought about.
+    validations:
+      required: false
+  - type: textarea
+    id: success
+    attributes:
+      label: What would make this complete?
+      description: An observable result. For numerical work, how it could be validated; for visual work, the intended output or interaction.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and didn't find this already requested
+          required: true
