@@ -1,6 +1,6 @@
 # Contributing to AXbit
 
-AXbit is an astrodynamics and simulation project first. Reliable propagation, clear assumptions, and checkable results matter more than surface polish — but graphics, interaction, docs, platform support, and tooling are all fair game when they make the simulation easier to understand or trust.
+AXbit is an astrodynamics and simulation project, but graphics, interaction, docs, platform support, and tooling are all welcome when they make the simulation easier to understand or trust.
 
 New numerical work is especially welcome. A Monte Carlo system, for example, is more than a button that launches many runs: it needs a defined source of uncertainty (an SBDB covariance matrix, say), reproducible sampling, documented assumptions, useful summaries, and a visualization that doesn't imply more certainty than the data supports. You don't need to work all that out before starting a Discussion.
 
@@ -20,11 +20,13 @@ cargo build
 
 Kernels aren't checked into the repo (they're large binaries). See [`docs/KERNELS.md`](./docs/KERNELS.md) for fetching and configuration before running anything that needs ephemeris data.
 
-## Before you start on something big
+## Discussion first, or just do it?
 
-Start a Discussion before substantial work — a new integrator, force model, Monte Carlo pipeline, kernel workflow, or reference frame. Explain the problem, the rough boundary of the work, and how we'd know it works. Early prototypes and partial designs are fine.
+If you know what you're doing and you're confident in the approach — do it. Open a PR. You don't need permission.
 
-Small fixes (typos, obvious bugs, doc corrections) don't need this — just open a PR.
+Start a Discussion instead when any of that isn't true: you're unsure about the design, you want feedback before sinking real time into it, or it's substantial enough that going the wrong direction would waste a lot of your effort (a new integrator, force model, Monte Carlo pipeline, kernel workflow, reference frame). Explain the problem, the rough boundary of the work, and how we'd know it works. Early prototypes and partial designs are fine — a Discussion isn't a proposal you need to get right the first time.
+
+A Discussion is a tool for reducing wasted work, yours most of all — not a gate you need to clear.
 
 ## Making changes
 
@@ -37,13 +39,13 @@ Small fixes (typos, obvious bugs, doc corrections) don't need this — just open
 
 ### Numerical and simulation changes
 
-State the scenario and assumptions well enough that someone else can repeat the result. Include initial conditions and data sources, and compare against an analytical result, trusted implementation, or reference dataset when one exists. Keep tolerances explicit. A plot is a good sanity check but not a substitute for a numerical one.
+State the scenario and assumptions well enough that someone else can repeat the result. Include initial conditions and data sources, and compare against an analytical result, trusted implementation, or reference dataset when one exists. Keep tolerances explicit.
 
 Stochastic work should also document the random distribution, covariance interpretation, sample count, seed/reproducibility strategy, and what statistics are being reported.
 
 ### Graphics and interface changes
 
-Trajectory rendering, bodies and materials, plots, camera controls, UI — all welcome. Include before/after screenshots or a short recording for anything visible. Note any effect on performance or on how scientific quantities are represented, and favor clarity over decoration if they're in tension.
+Trajectory rendering, bodies and materials, plots, camera controls, UI — all welcome. Include before/after screenshots or a short recording for anything visible.
 
 ## Commits and branches
 
@@ -51,10 +53,6 @@ No strict format enforced, but:
 
 - Commit messages should explain *why*, not just *what* — "fix Dop853 tolerance for close approach" beats "fix bug."
 - Branch names are your call; `type/short-description` (e.g. `fix/hill-sphere-check`) is common but not required.
-
-## Opening the PR
-
-Fill out the pull request template. Check every change type that applies, and include evidence suited to the work — test output or reference comparisons for numerical changes, screenshots or recordings for visual ones.
 
 ## Discussions, issues, and the project board
 
@@ -69,6 +67,14 @@ The board then moves through these stages:
 - **Done** — the PR was merged; this should be automated when the Issue closes.
 
 For a confirmed bug, use the bug form directly. If you're unsure whether something is a bug or still shaping a feature, start a Discussion.
+
+### Claiming an issue
+
+See an open issue you want to work on? Comment saying so — I'll assign it to you so two people don't end up building the same thing. No need to wait for a green light beyond that; once it's assigned, it's yours to run with (see above for when a Discussion is worth it before you dive in).
+
+Don't see an issue for what you want to build? Open your own.
+
+If two issues end up describing the same goal — I'll close the duplicate and link it to the original so the discussion and any claim stay in one place.
 
 ## Working together
 

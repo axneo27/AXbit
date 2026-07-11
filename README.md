@@ -7,7 +7,8 @@
 <a href="#screenshots"><strong>Screenshots</strong></a> •
 <a href="#quick-start"><strong>Quick Start</strong></a> •
 <a href="#documentation"><strong>Documentation</strong></a> •
-<a href="#contributing"><strong>Contribute</strong></a>
+<a href="#contributing"><strong>Contribute</strong></a> •
+<a href="#roadmap"><strong>Roadmap</strong></a>
 </p>
 
 <p align="center">

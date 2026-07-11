@@ -1,34 +1,36 @@
 name: Bug report
 description: Something in AXbit isn't working the way it should
 title: "[Bug]: "
-labels: ["bug", "triage"]
+labels: ["bug"]
 body:
   - type: textarea
     id: what-happened
     attributes:
       label: What happened?
-      description: What did you do, what did you expect, what actually happened instead?
+      description: |
+        What were you doing, what did you expect, and what happened instead?
+        Rough steps are fine — we can fill in gaps together in the thread.
       placeholder: |
-        Loaded the jupiter kernel group and simulated a trajectory past Europa.
-        Expected the integrator to switch to Dop853 on approach; it stayed on WHFast and the orbit diverged.
+        Describe in a few lines. 
+
+        Steps: ...
     validations:
       required: true
+
   - type: textarea
-    id: repro-steps
+    id: extra
     attributes:
-      label: Steps to reproduce
-      description: Minimal steps someone else could follow to see the same thing.
-      placeholder: |
-        1. Load kernel group `jupiter`
-        2. Propagate body X from epoch Y to epoch Z
-        3. ...
+      label: Anything else that'd help?
+      description: |
+        Logs, error output, commit hash, OS, which kernel groups were loaded,
+        screenshots, comparison data — whatever you've got. Drag files in if useful.
     validations:
-      required: true
+      required: false
+
   - type: dropdown
     id: area
     attributes:
-      label: Where does this live?
-      description: Pick the part of AXbit this is most related to, if you know.
+      label: Where does this live? (guess is fine)
       options:
         - Integrator / force models
         - Simulation / uncertainty analysis
@@ -37,57 +39,6 @@ body:
         - UI / interaction
         - Build / platform support
         - Performance
-        - Something else / not sure
+        - Not sure
     validations:
       required: false
-  - type: textarea
-    id: logs
-    attributes:
-      label: Relevant logs or error output
-      description: Paste any error output, stack trace, or SPICE error here. Rendered as a code block automatically.
-      render: shell
-    validations:
-      required: false
-  - type: textarea
-    id: evidence
-    attributes:
-      label: Screenshots, data, or comparison
-      description: Anything that makes the problem visible or measurable. You can drag files into this field.
-    validations:
-      required: false
-  - type: input
-    id: commit
-    attributes:
-      label: Commit hash
-      description: There are no tagged releases yet — give the commit hash you built from (`git rev-parse HEAD` or the short hash from `git log`).
-      placeholder: e.g. abc1234
-    validations:
-      required: true
-  - type: input
-    id: kernels
-    attributes:
-      label: Kernel groups loaded
-      description: Which groups from kernels.toml were active when this happened, if relevant.
-      placeholder: e.g. inner_solar_system, jupiter
-    validations:
-      required: false
-  - type: dropdown
-    id: os
-    attributes:
-      label: OS
-      options:
-        - Linux
-        - macOS
-        - Windows
-        - Other / not sure
-    validations:
-      required: false
-  - type: checkboxes
-    id: checks
-    attributes:
-      label: Checklist
-      options:
-        - label: I searched existing issues and didn't find a duplicate
-          required: true
-        - label: I'm using kernels from a supported/known source, not a hand-edited or unofficial kernel
-          required: true

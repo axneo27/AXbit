@@ -1,26 +1,38 @@
-name: Feature or research proposal
-description: Propose a capability, numerical method, analysis tool, or visual improvement
-title: "[Feature]: "
+name: Idea or feature request
+description: Suggest a capability, method, analysis tool, or improvement
+title: "[Idea]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Describe the use case first. A design is welcome, but easier to judge once the problem is clear.
+        Tell what you're trying to do — a design or approach is welcome
+        too.
+
   - type: textarea
     id: problem
     attributes:
       label: What are you trying to do?
-      description: Describe the task, question, or limitation rather than only naming a feature.
+      description: The task, question, or limitation you're running into.
       placeholder: |
-        I want to simulate a body with eccentricity > 1 (a hyperbolic flyby), but the current
-        renderer only draws elliptical orbits, so I can't visualize the trajectory.
+        Describe in a few lines your feature request
     validations:
       required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Got an idea for how to solve it?
+      description: |
+        Equations, sketches —
+        anything. Fine to leave blank and discuss.
+    validations:
+      required: false
+
   - type: dropdown
     id: area
     attributes:
-      label: Main area
+      label: Main area (guess is fine)
       options:
         - Integrator / force models
         - Simulation / uncertainty / Monte Carlo
@@ -30,35 +42,6 @@ body:
         - UI / workflow
         - Performance
         - Documentation / examples
-        - Build / platform support
-        - Something else / not sure
-    validations:
-      required: true
-  - type: textarea
-    id: proposal
-    attributes:
-      label: Proposed solution
-      description: If you have an approach in mind, describe its behavior and boundaries. Equations, papers, data sources, or sketches welcome but not required.
+        - Not sure
     validations:
       required: false
-  - type: textarea
-    id: alternatives
-    attributes:
-      label: Alternatives you've considered
-      description: Workarounds you're using, or other approaches you thought about.
-    validations:
-      required: false
-  - type: textarea
-    id: success
-    attributes:
-      label: What would make this complete?
-      description: An observable result. For numerical work, how it could be validated; for visual work, the intended output or interaction.
-    validations:
-      required: false
-  - type: checkboxes
-    id: checks
-    attributes:
-      label: Checklist
-      options:
-        - label: I searched existing issues and didn't find this already requested
-          required: true
