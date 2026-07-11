@@ -12,7 +12,7 @@ body:
   - type: textarea
     id: problem
     attributes:
-      label: What are you trying to do?
+      label: Description 
       description: The task, question, or limitation you're running into.
       placeholder: |
         Describe in a few lines your feature request
@@ -22,7 +22,7 @@ body:
   - type: textarea
     id: proposal
     attributes:
-      label: Got an idea for how to solve it?
+      label: Proposed solution
       description: |
         Equations, sketches —
         anything. Fine to leave blank and discuss.
