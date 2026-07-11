@@ -6,7 +6,7 @@ body:
   - type: textarea
     id: what-happened
     attributes:
-      label: What happened?
+      label: What happened
       description: |
         What were you doing, what did you expect, and what happened instead?
         Rough steps are fine — we can fill in gaps together in the thread.
@@ -20,7 +20,7 @@ body:
   - type: textarea
     id: extra
     attributes:
-      label: Anything else that'd help?
+      label: Additional information
       description: |
         Logs, error output, commit hash, OS, which kernel groups were loaded,
         screenshots, comparison data — whatever you've got. Drag files in if useful.
@@ -30,7 +30,7 @@ body:
   - type: dropdown
     id: area
     attributes:
-      label: Where does this live? (guess is fine)
+      label: Main area
       options:
         - Integrator / force models
         - Simulation / uncertainty analysis
