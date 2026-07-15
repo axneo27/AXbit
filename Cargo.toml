@@ -1,5 +1,6 @@
 [package]
 name = "AXbit"
+identifier = "com.axneo27.AXbit"
 version = "0.1.0"
 edition = "2024"
 
@@ -41,3 +42,6 @@ url = "2.5"
 anyhow = "1.0"
 fs_extra = "1.2"
 cc = "1.0"
+
+[package.metadata.packager]
+before-packaging-command = "cargo build --release"

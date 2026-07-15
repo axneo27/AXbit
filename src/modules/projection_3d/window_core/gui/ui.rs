@@ -224,6 +224,9 @@ pub fn update_gui(state: &mut AppState) {
     egui::TopBottomPanel::top("menu").show(&ctx, |ui| {
         let integration_mode_active = state.show_integrator_window || state.integrator_in_progress;
         ui.horizontal(|ui| {
+            if ui.button("SPICE Kernels Setup").clicked() {
+                state.return_to_kernel_setup = true;
+            }
             ui.label("FPS:");
             ui.label(format!("{:.1}", state.fps_display));
             ui.separator();

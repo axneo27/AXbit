@@ -87,6 +87,7 @@ impl ApplicationHandler for App {
             },
             WindowEvent::RedrawRequested => {
                 let mut simulation_start_request = None;
+                let mut kernel_setup_request = None;
 
                 let render_result = match state {
                     AppScreen::KernelSetup(state) => {
@@ -100,7 +101,11 @@ impl ApplicationHandler for App {
                         let dt = self.last_time.elapsed();
                         self.last_time = std::time::Instant::now();
                         state.update(dt);
-                        state.render()
+                        let result = state.render();
+                        if state.take_kernel_setup_request() {
+                            kernel_setup_request = Some(state.window.clone());
+                        }
+                        result
                     }
                 };
 
@@ -139,6 +144,11 @@ impl ApplicationHandler for App {
                             self.state = Some(AppScreen::KernelSetup(setup));
                         }
                     }
+                } else if let Some(window) = kernel_setup_request {
+                    utils::clear_spice_m();
+                    self.state = None;
+                    let setup = pollster::block_on(KernelSetupState::new(window)).unwrap();
+                    self.state = Some(AppScreen::KernelSetup(setup));
                 }
             }
             WindowEvent::MouseInput {

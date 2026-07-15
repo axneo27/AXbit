@@ -98,6 +98,7 @@ pub struct AppState {
     frame_count: u64,
     pub(crate) fps_display: f64,
     fps_update_timer: std::time::Instant,
+    pub(crate) return_to_kernel_setup: bool,
     pub(crate) show_settings: bool,
     // Small-body (SBDB) manager UI state
     pub(crate) show_sb_manager: bool,
@@ -650,6 +651,7 @@ impl AppState {
             frame_count: 0,
             fps_display: 0.0,
             fps_update_timer: std::time::Instant::now(),
+            return_to_kernel_setup: false,
             show_settings: false,
             show_sb_manager: false,
             sb_download_id_input: String::new(),
@@ -872,6 +874,10 @@ impl AppState {
 
     pub fn update_gui(&mut self) {
         ui::update_gui(self);
+    }
+
+    pub fn take_kernel_setup_request(&mut self) -> bool {
+        std::mem::take(&mut self.return_to_kernel_setup)
     }
 
     pub fn update(&mut self, dt: std::time::Duration) {

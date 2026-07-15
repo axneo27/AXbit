@@ -35,7 +35,7 @@ pub mod modules {
     pub mod utils;
     pub mod sbdb;
     pub mod kernel_config;
-    pub mod kernel_downloader;
+    pub mod kernel_manager;
     pub mod spice_bindings;
     pub mod spice_ker;
 }

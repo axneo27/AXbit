@@ -603,6 +603,24 @@ pub fn remove_incomplete_kernel_files(incomplete_file_dirs: &[PathBuf]) -> Resul
     Ok(())
 }
 
+pub fn delete_kernel_files(kernel: &KernelDownload) -> Result<(), KernelError> {
+    let part_destination = PathBuf::from(format!("{}.part", kernel.destination.display()));
+    for path in [&kernel.destination, &part_destination] {
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(KernelError::FileSystem {
+                    operation: FileOperation::Delete,
+                    path: path.clone(),
+                    source,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn header_value(headers: &header::HeaderMap, name: header::HeaderName) -> Option<String> {
     headers.get(name)?.to_str().ok().map(str::to_owned)
 }
@@ -672,6 +690,35 @@ mod tests {
         assert_eq!(resume.part_destination, part_destination);
         assert_eq!(resume.downloaded_bytes(), 7);
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn deletes_kernel_and_partial_files() {
+        let root = std::env::temp_dir().join(format!(
+            "axbit-delete-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let destination = root.join("kernel.bsp");
+        let part_destination = PathBuf::from(format!("{}.part", destination.display()));
+        let download = KernelDownload {
+            relative_path: PathBuf::from("kernel.bsp"),
+            destination: destination.clone(),
+            url: reqwest::Url::parse("https://example.com/kernel.bsp").unwrap(),
+        };
+
+        fs::write(&destination, b"kernel").unwrap();
+        fs::write(&part_destination, b"partial").unwrap();
+        delete_kernel_files(&download).unwrap();
+
+        assert!(!destination.exists());
+        assert!(!part_destination.exists());
+        delete_kernel_files(&download).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
