@@ -1,9 +1,6 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
-use std::path::Path;
-
-const DB_PATH: &str = "data/sbdb.db";
 
 pub fn init_db() -> Result<()> {
     let conn = open_db()?;
@@ -62,7 +59,7 @@ pub fn init_db() -> Result<()> {
 }
 
 fn open_db() -> Result<Connection> {
-    let path = Path::new(DB_PATH);
+    let path = crate::modules::app_paths::get().sbdb();
 
     if let Some(parent) = path.parent() {
         if !parent.exists() {
@@ -70,7 +67,7 @@ fn open_db() -> Result<Connection> {
         }
     }
 
-    let conn = Connection::open(DB_PATH).context("failed to open SQLite database")?;
+    let conn = Connection::open(path).context("failed to open SQLite database")?;
 
     conn.execute_batch(
         "

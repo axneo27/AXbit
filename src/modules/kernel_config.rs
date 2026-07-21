@@ -15,6 +15,8 @@ pub struct BaseKernelConfig {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BaseKernelFileConfig {
     pub file: String,
+    #[serde(default)]
+    pub download_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -26,6 +28,8 @@ pub struct KernelGroupConfig {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct KernelFileConfig {
     pub file: String,
+    #[serde(default)]
+    pub download_url: Option<String>,
     pub time_bounds: [String; 2],
     pub ids: Vec<[i32; 2]>,
 }

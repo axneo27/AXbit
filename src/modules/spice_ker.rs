@@ -9,10 +9,10 @@ use crate::modules::utils;
 
 /// Funcs for testing
 pub fn initialize_test_kernels(kernels_path: &Path) -> Result<(), String> {
-    let config_path = PathBuf::from("kernels.toml");
+    let config_path = crate::modules::app_paths::get().kernel_manifest();
     spice_bindings::spice_clear()?;
-    furnish_base_kernels(&config_path, kernels_path)?;
-    initialize_kernel_registry(&config_path, kernels_path)?;
+    furnish_base_kernels(config_path, kernels_path)?;
+    initialize_kernel_registry(config_path, kernels_path)?;
     load_kernel_group("inner_solar_system")?;
 
     Ok(())

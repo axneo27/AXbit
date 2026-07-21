@@ -102,8 +102,8 @@ impl ApplicationHandler for App {
                         self.last_time = std::time::Instant::now();
                         state.update(dt);
                         let result = state.render();
-                        if state.take_kernel_setup_request() {
-                            kernel_setup_request = Some(state.window.clone());
+                        if let Some(manifest) = state.kernel_setup_request() {
+                            kernel_setup_request = Some((state.window.clone(), manifest));
                         }
                         result
                     }
@@ -128,6 +128,7 @@ impl ApplicationHandler for App {
                 if let Some((window, selection)) = simulation_start_request {
                     // The same window gets a new surface/device owned by AppState.
                     self.state = None;
+                    let manifest = selection.manifest_path.clone();
                     match pollster::block_on(AppState::new(window.clone(), selection)) {
                         Ok(mut state) => {
                             let size = state.window.inner_size();
@@ -137,17 +138,22 @@ impl ApplicationHandler for App {
                         }
                         Err(error) => {
                             log::error!("Could not start simulation: {}", error);
-                            let mut setup =
-                                pollster::block_on(KernelSetupState::new(window)).unwrap();
+                            let mut setup = pollster::block_on(
+                                KernelSetupState::new_with_manifest(window, manifest),
+                            )
+                            .unwrap();
                             setup
                                 .show_start_error(format!("Could not start simulation: {}", error));
                             self.state = Some(AppScreen::KernelSetup(setup));
                         }
                     }
-                } else if let Some(window) = kernel_setup_request {
+                } else if let Some((window, manifest)) = kernel_setup_request {
                     utils::clear_spice_m();
                     self.state = None;
-                    let setup = pollster::block_on(KernelSetupState::new(window)).unwrap();
+                    let setup = pollster::block_on(KernelSetupState::new_with_manifest(
+                        window, manifest,
+                    ))
+                    .unwrap();
                     self.state = Some(AppScreen::KernelSetup(setup));
                 }
             }

@@ -4,7 +4,7 @@ use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike, Duration};
 use egui_extras::DatePickerButton;
 use crate::modules::projection_3d::state::StateVector;
 use crate::modules::sbdb;
-use crate::modules::{spice_ker, projection_3d::simulation::FocusedBodyType};
+use crate::modules::projection_3d::simulation::FocusedBodyType;
 use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc;
 use serde::{Deserialize, Serialize};
@@ -32,8 +32,8 @@ struct SavedSettings {
     kernel_file_selections: std::collections::HashMap<String, Vec<usize>>,
 }
 
-fn settings_path() -> std::path::PathBuf {
-    std::path::PathBuf::from("data/settings.toml")
+fn settings_path() -> &'static std::path::Path {
+    crate::modules::app_paths::get().settings()
 }
 
 fn load_settings(state: &mut AppState) {
@@ -56,36 +56,6 @@ fn load_settings(state: &mut AppState) {
             state.integrator_proximity_reference = saved.integrator_proximity_reference;
             state.integrator_proximity_multiplier = saved.integrator_proximity_multiplier;
 
-            // Restore kernel selections or query registry if none were saved
-            if !state.groups_to_load.is_empty() {
-                // The startup kernel screen is authoritative for this session.
-            } else if saved.loaded_groups.is_empty() {
-                state.groups_to_load = spice_ker::list_loaded_groups().unwrap_or_else(|_| vec!["inner_solar_system".to_string()]);
-            } else {
-                state.groups_to_load = saved.loaded_groups;
-            }
-            if state.advanced_kernel_selections.is_empty() {
-                state.advanced_kernel_selections = saved.kernel_file_selections.clone();
-            }
-
-            // Apply file selections to registry
-            for (group_id, indices) in &state.advanced_kernel_selections {
-                let _ = spice_ker::set_group_file_selection(group_id, indices.clone());
-            }
-
-            // Populate UI state from registry
-            if let Ok(infos) = spice_ker::get_all_group_infos_short() {
-                state.kernel_group_selection = infos
-                    .into_iter()
-                    .map(|info| spice_ker::GroupInfoShort {
-                        id: info.id.clone(),
-                        name: info.name,
-                        is_available: info.is_available,
-                        is_loaded: state.groups_to_load.contains(&info.id),
-                    })
-                    .collect();
-            }
-
             rebuild_instances_and_gpu(state);
         }
     }
@@ -94,12 +64,6 @@ fn load_settings(state: &mut AppState) {
 fn save_settings(state: &AppState) {
     let mut sb_ids: Vec<i32> = state.simulation.sb_filter.iter().copied().collect();
     sb_ids.sort();
-
-    let loaded_groups: Vec<String> = state.kernel_group_selection
-        .iter()
-        .filter(|g| g.is_loaded)
-        .map(|g| g.id.clone())
-        .collect();
 
     let saved = SavedSettings {
         show_barycenters: state.simulation.show_barycenters,
@@ -113,7 +77,7 @@ fn save_settings(state: &AppState) {
         set_second: state.set_second,
         integrator_proximity_reference: state.integrator_proximity_reference,
         integrator_proximity_multiplier: state.integrator_proximity_multiplier,
-        loaded_groups,
+        loaded_groups: state.groups_to_load.clone(),
         kernel_file_selections: state.advanced_kernel_selections.clone(),
     };
 
@@ -460,217 +424,8 @@ pub fn update_gui(state: &mut AppState) {
                     state.settings_dirty = true;
                 }
 
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.heading("SPICE Kernels");
-                    if ui.button("Advanced options").clicked() {
-                        state.show_advanced_kernel_options = true;
-                    }
-                });
-
-                // Display kernel groups with checkboxes
-                for group_info in state.kernel_group_selection.iter_mut() {
-                    let is_mandatory = group_info.id == "inner_solar_system";
-                    let is_incomplete = spice_ker::is_group_incomplete(&group_info.id).unwrap_or(false);
-
-                    ui.horizontal(|ui| {
-                        if is_mandatory {
-                            group_info.is_loaded = true;
-                            ui.add_enabled(false, egui::Checkbox::new(&mut true, &group_info.name));
-                        } else {
-                            let mut checked = group_info.is_loaded;
-                            if ui.add_enabled(
-                                group_info.is_available,
-                                egui::Checkbox::new(&mut checked, &group_info.name),
-                            ).changed() {
-                                group_info.is_loaded = checked;
-                            }
-                        }
-                        
-                        if !group_info.is_available {
-                            ui.label(egui::RichText::new("(no files)").small().color(egui::Color32::DARK_GRAY));
-                        } else if is_mandatory {
-                            ui.label(egui::RichText::new("(required)").small().color(egui::Color32::DARK_GRAY));
-                        }
-                        if is_incomplete && group_info.is_loaded {
-                            ui.label(egui::RichText::new("incomplete").small().color(egui::Color32::YELLOW));
-                        }
-                    });
-                }
-
-                ui.add_space(4.0);
-                if ui.button("Apply & Reload Simulation").clicked() {
-                    state.kernel_reload_pending = true;
-                }
-                if let Some(ref err) = state.kernel_reload_error {
-                    ui.colored_label(egui::Color32::RED, err);
-                }
             });
     }
-
-    // Deferred kernel reload (must happen outside the settings egui closure)
-    if state.kernel_reload_pending {
-        state.kernel_reload_pending = false;
-        
-        // Collect selected groups from UI state
-        let selected: Vec<String> = state.kernel_group_selection
-            .iter()
-            .filter(|g| g.is_available && (g.is_loaded || g.id == "inner_solar_system"))
-            .map(|g| g.id.clone())
-            .collect();
-
-        if !selected.is_empty() {
-            match state.simulation.reload_with_groups(&selected) {
-                Ok(()) => {
-                    state.kernel_reload_error = None;
-                    state.settings_dirty = true;
-                    // Update persisted groups_to_load from current UI state
-                    state.groups_to_load = selected;
-                    save_settings(state);
-                    rebuild_instances_and_gpu(state);
-                }
-                Err(e) => {
-                    state.kernel_reload_error = Some(e);
-                }
-            }
-        }
-    }
-
-    if state.show_advanced_kernel_options {
-        let mut open = state.show_advanced_kernel_options;
-        egui::Window::new("Advanced Kernel Options")
-            .open(&mut open)
-            .vscroll(true)
-            .show(&ctx, |ui| {
-                use crate::modules::spice_ker;
-
-                if let Ok(group_infos) = spice_ker::get_all_group_infos_short() {
-                    for group_info in group_infos {
-
-                        let group_id = group_info.id;
-                        
-                        // inner_solar_system is always required and not configurable in advanced settings
-                        if group_id == "inner_solar_system" {
-                            continue;
-                        }
-                        
-                        let group_name = group_info.name;
-                        let group_enabled = state.kernel_group_selection
-                            .iter()
-                            .find(|group_info| group_info.id == group_id)
-                            .map(|group_info| group_info.is_loaded)
-                            .unwrap_or(true);
-                        
-                        ui.group(|ui| {
-                            let heading_color = if group_enabled {
-                                egui::Color32::WHITE
-                            } else {
-                                egui::Color32::GRAY
-                            };
-                            ui.label(egui::RichText::new(&group_name).heading().color(heading_color));
-
-                            if let Ok(files) = spice_ker::get_group_files_advanced(&group_id) {
-
-                                if !state.advanced_kernel_selections.contains_key(&group_id) {
-                                    let selected: Vec<usize> = files
-                                        .iter()
-                                        .enumerate()
-                                        .filter_map(|(idx, file_info)| {
-                                            if file_info.is_available && file_info.is_selected {
-                                                Some(idx)
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                        .collect();
-                                    state.advanced_kernel_selections.insert(group_id.clone(), selected);
-                                }
-
-                                let selections = state.advanced_kernel_selections.entry(group_id.clone()).or_insert_with(Vec::new);
-
-                                for (idx, file_info) in files.iter().enumerate() {
-                                    ui.horizontal(|ui| {
-                                        let mut checked = selections.contains(&idx);
-                                        let enabled_checkbox = file_info.is_available && group_enabled;
-                                        let resp = ui.add_enabled(
-                                            enabled_checkbox,
-                                            egui::Checkbox::new(&mut checked, ""),
-                                        );
-                                        if resp.changed() && enabled_checkbox {
-                                            if checked {
-                                                if !selections.contains(&idx) {
-                                                    selections.push(idx);
-                                                }
-                                            } else {
-                                                selections.retain(|&i| i != idx);
-                                            }
-                                        }
-
-                                        ui.vertical(|ui| {
-                                            let file_color = if group_enabled {
-                                                egui::Color32::WHITE
-                                            } else {
-                                                egui::Color32::GRAY
-                                            };
-                                            ui.label(egui::RichText::new(file_info.name.clone()).small().strong().color(file_color));
-                                            ui.label(
-                                                egui::RichText::new(format!(
-                                                    "{} -> {}\nIDs: {}",
-                                                    file_info.time_bounds_utc_start, file_info.time_bounds_utc_end, file_info.ids_formatted
-                                                ))
-                                                .small()
-                                                .color(if group_enabled {
-                                                    egui::Color32::GRAY
-                                                } else {
-                                                    egui::Color32::DARK_GRAY
-                                                }),
-                                            );
-                                        });
-
-                                        if !file_info.is_available {
-                                            ui.label(egui::RichText::new("[Not found]").small().color(egui::Color32::DARK_GRAY));
-                                        }
-                                    });
-                                }
-                            }
-                        });
-                    }
-                }
-
-                ui.separator();
-                
-                // Validate: each enabled group must have at least 1 file selected
-                let has_validation_error = state.kernel_group_selection
-                    .iter()
-                    .any(|g| {
-                        g.id != "inner_solar_system"
-                            && g.is_loaded
-                            && state.advanced_kernel_selections.get(&g.id).map_or(true, |s| s.is_empty())
-                    });
-                
-                if has_validation_error {
-                    ui.label(
-                        egui::RichText::new("Each enabled group must have at least 1 kernel file selected")
-                            .small()
-                            .color(egui::Color32::RED),
-                    );
-                    ui.add_enabled(false, egui::Button::new("Apply Advanced Settings"));
-                } else if ui.button("Apply Advanced Settings").clicked() {
-                    // Apply selections to kernel registry
-                    for (group_id, selections) in &state.advanced_kernel_selections {
-                        let _ = spice_ker::set_group_file_selection(group_id, selections.clone());
-                    }
-                    if let Err(e) = state.simulation.update_time_bounds() {
-                        eprintln!("Warning: failed to update time bounds: {}", e);
-                    }
-                    save_settings(state);
-                    state.kernel_reload_pending = true;
-                    state.show_advanced_kernel_options = false;
-                }
-            });
-        state.show_advanced_kernel_options = open;
-    }
-
 
     if state.show_sb_manager {
         let mut open = state.show_sb_manager;

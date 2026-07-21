@@ -93,6 +93,7 @@ impl Simulation {
     pub fn new(coord_system: CoordSystem) -> Result<Self, String> {
         Self::new_with_kernel_selection(
             coord_system,
+            crate::modules::app_paths::get().kernel_manifest(),
             &[],
             &std::collections::HashMap::new(),
         )
@@ -100,11 +101,11 @@ impl Simulation {
 
     pub fn new_with_kernel_selection(
         coord_system: CoordSystem,
+        config_path: &std::path::Path,
         selected_groups: &[String],
         selected_files: &std::collections::HashMap<String, Vec<usize>>,
     ) -> Result<Self, String> {
-        let config_path = std::path::Path::new("kernels.toml");
-        let kernels_path = std::path::Path::new("spice-tools/kernels");
+        let kernels_path = crate::modules::app_paths::get().kernels();
         // Must come first: LSK and PCK are required for UTC ET conversions
         spice_ker::furnish_base_kernels(config_path, kernels_path)
             .map_err(|e| format!("Failed to load base SPICE kernels: {}", e))?;
@@ -196,65 +197,6 @@ impl Simulation {
 
     pub fn current_time_et(&self) -> f64 { self.current_time_et }
 
-    /// Unloads all currently loaded groups, loads the new set, then rebuilds NAIF objects.
-    pub fn reload_with_groups(&mut self, selected_groups: &[String]) -> Result<(), String> {
-        // Unload every currently loaded group
-        let loaded = spice_ker::list_loaded_groups()
-            .map_err(|e| format!("Failed to list loaded groups: {}", e))?;
-        for gid in &loaded {
-            spice_ker::unload_kernel_group(gid)
-                .map_err(|e| format!("Failed to unload group '{}': {}", gid, e))?;
-        }
-
-        // inner_solar_system is always required
-        spice_ker::load_kernel_group("inner_solar_system")
-            .map_err(|e| format!("Failed to load inner_solar_system: {}", e))?;
-        for gid in selected_groups {
-            if gid != "inner_solar_system" {
-                spice_ker::load_kernel_group(gid)
-                    .map_err(|e| format!("Failed to load group '{}': {}", gid, e))?;
-            }
-        }
-
-        let (min_time_et, max_time_et) = spice_ker::get_current_time_bounds()
-            .map_err(|e| format!("Failed to get time bounds: {}", e))?;
-
-        self.available_satellites_ids = spice_ker::get_all_satellite_ids()
-            .map_err(|e| format!("Failed to get satellite ids: {}", e))?;
-        self.planet_ids = spice_ker::get_all_planet_ids()
-            .map_err(|e| format!("Failed to get planet ids: {}", e))?;
-        self.barycenter_ids = spice_ker::get_all_barycenter_ids()
-            .map_err(|e| format!("Failed to get barycenter ids: {}", e))?;
-
-        self.min_time_et = min_time_et;
-        self.max_time_et = max_time_et;
-        self.current_time_et = self.current_time_et.clamp(min_time_et, max_time_et);
-        self.current_time_utc = utils::et_to_utc(self.current_time_et)
-            .unwrap_or_else(|_| "Invalid Time".to_string());
-
-        self.naif_celestial_objects = Arc::new(Self::initialize_naif_celestials(
-            &self.coord_system,
-            self.current_time_et,
-            self.ref_frame,
-            &self.available_satellites_ids,
-        )?);
-
-        let mut sorted: Vec<i32> = self.naif_celestial_objects.keys().copied().collect();
-        sorted.sort_unstable();
-        self.naif_sorted_ids = sorted;
-
-        self.focused_body_id = 10;
-        self.focused_body_type = FocusedBodyType::Naif;
-
-        let mut v = vec![10];
-        self.current_visible_ids = match self.coord_system {
-            CoordSystem::BodyCentric => { v.extend_from_slice(&self.planet_ids); v },
-            CoordSystem::BarocenterCentric => { v.extend(self.barycenter_ids.iter().filter(|&&id| id != 0).copied()); v },
-        };
-
-        Ok(())
-    }
-
     /// (min_et, max_et) intersection time bounds of all loaded kernel groups.
     pub fn time_bounds(&self) -> (f64, f64) { (self.min_time_et, self.max_time_et) }
 
@@ -267,22 +209,6 @@ impl Simulation {
                 .unwrap_or(2000)
         };
         (parse_year(self.min_time_et), parse_year(self.max_time_et))
-    }
-
-    /// Used after updating active kernel groups
-    pub fn update_time_bounds(&mut self) -> Result<(), String> {
-        let (min_time_et, max_time_et) = spice_ker::get_current_time_bounds()
-            .map_err(|e| format!("Failed to get updated time bounds: {}", e))?;
-        
-        self.min_time_et = min_time_et;
-        self.max_time_et = max_time_et;
-        
-        // Clamp current time to new bounds
-        if !self.current_time_et.is_finite() || self.current_time_et < min_time_et || self.current_time_et > max_time_et {
-            self.current_time_et = self.current_time_et.clamp(min_time_et, max_time_et);
-        }
-        
-        Ok(())
     }
 
     pub fn coord_system(&self) -> CoordSystem { self.coord_system }

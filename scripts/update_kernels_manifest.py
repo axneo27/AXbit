@@ -28,7 +28,7 @@ KERNEL_ENTRY_RE = re.compile(
 )
 GROUP_SECTION_RE = re.compile(r"^\[groups\.(?P<group>[^\]]+)\]$")
 KERNEL_LIST_START_RE = re.compile(r"^\s*kernels\s*=\s*\[\s*$")
-
+DOWNLOAD_URL_RE = re.compile(r'\bdownload_url\s*=\s*"(?P<url>[^"]+)"')
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -262,8 +262,15 @@ def update_manifest(
 
         body_ids, time_bounds = inspect_kernel(kernel_path)
         ranges = compress_ids(body_ids)
+        download_url_match = DOWNLOAD_URL_RE.search(line_without_newline)
+        download_url = (
+            f'download_url = "{download_url_match.group("url")}", '
+            if download_url_match
+            else ""
+        )
         updated_lines.append(
             f'{match.group("indent")}{{ file = "{relative_path}", '
+            f'{download_url}'
             f'time_bounds = ["{time_bounds[0]}", "{time_bounds[1]}"], '
             f'ids = {format_ranges(ranges)} }},{match.group("suffix")}{newline}'
         )

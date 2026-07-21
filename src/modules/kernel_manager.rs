@@ -10,19 +10,9 @@ use crate::modules::kernel_config::KernelConfig;
 
 pub const NAIF_GENERIC_KERNELS_URL: &str =
     "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/";
-pub const KERNELS_CONFIG_FILE: &str = "kernels.toml";
-pub const KERNELS_DIR: &str = "spice-tools/kernels";
 /// Unused but kept for reference. 
 /// We automatically load base_kernels before anything else, and inner_solar_system is the only other required group.
 pub const REQUIRED_KERNEL_GROUPS: &[&str] = &["base_kernels", "inner_solar_system"];
-
-pub fn kernels_dir() -> PathBuf {
-    PathBuf::from(KERNELS_DIR)
-}
-
-pub fn kernels_config() -> PathBuf {
-    PathBuf::from(KERNELS_CONFIG_FILE)
-}
 
 const USER_AGENT: &str = concat!("AXbit/", env!("CARGO_PKG_VERSION"));
 
@@ -210,7 +200,11 @@ pub fn read_kernel_groups(config_path: &Path, kernels_path: &Path) -> Result<Vec
         id: "base_kernels".to_string(),
         name: "Base Kernels".to_string(),
         kernels: build_downloads(
-            &config.base_kernels.kernels.into_iter().map(|kernel| kernel.file).collect::<Vec<String>>(),
+            config
+                .base_kernels
+                .kernels
+                .into_iter()
+                .map(|kernel| (kernel.file, kernel.download_url)),
             kernels_path,
             &base_url,
         )?,
@@ -220,7 +214,10 @@ pub fn read_kernel_groups(config_path: &Path, kernels_path: &Path) -> Result<Vec
     for (id, group) in config.groups {
         let required = id == "inner_solar_system";
         let kernels = build_downloads(
-            &group.kernels.into_iter().map(|kernel| kernel.file).collect::<Vec<String>>(),
+            group
+                .kernels
+                .into_iter()
+                .map(|kernel| (kernel.file, kernel.download_url)),
             kernels_path,
             &base_url,
         )?;
@@ -238,15 +235,20 @@ pub fn read_kernel_groups(config_path: &Path, kernels_path: &Path) -> Result<Vec
 }
 
 fn build_downloads(
-    files: &[String],
+    files: impl IntoIterator<Item = (String, Option<String>)>,
     kernels_path: &Path,
     base_url: &reqwest::Url,
 ) -> Result<Vec<KernelDownload>, KernelError> {
     let mut kernels = Vec::new();
-    for file in files {
+    for (file, download_url) in files {
         let relative_path = PathBuf::from(&file);
-        let url = base_url.join(&file).map_err(|source| KernelError::InvalidUrl {
-            url: file.to_string(),
+        let url_text = download_url.as_deref().unwrap_or(&file);
+        let url = match download_url {
+            Some(_) => reqwest::Url::parse(url_text),
+            None => base_url.join(url_text),
+        }
+        .map_err(|source| KernelError::InvalidUrl {
+            url: url_text.to_string(),
             source,
         })?;
         kernels.push(KernelDownload {
@@ -621,6 +623,20 @@ pub fn delete_kernel_files(kernel: &KernelDownload) -> Result<(), KernelError> {
     Ok(())
 }
 
+pub fn delete_kernel_directory_contents(kernels_path: &Path) -> Result<(), KernelError> {
+    match fs::remove_dir_all(kernels_path) {
+        Ok(()) => {return Ok(());}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {return Ok(());}
+        Err(source) => {
+            return Err(KernelError::FileSystem {
+                operation: FileOperation::Delete,
+                path: kernels_path.to_path_buf(),
+                source,
+            });
+        }
+    }
+}
+
 fn header_value(headers: &header::HeaderMap, name: header::HeaderName) -> Option<String> {
     headers.get(name)?.to_str().ok().map(str::to_owned)
 }
@@ -723,20 +739,58 @@ mod tests {
     }
 
     #[test]
+    fn deletes_and_recreates_kernel_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "axbit-delete-all-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        fs::create_dir_all(root.join("unlisted/subdir")).unwrap();
+        fs::write(root.join("unlisted/subdir/custom.bsp"), b"kernel").unwrap();
+
+        delete_kernel_directory_contents(&root).unwrap();
+
+        assert!(root.is_dir());
+        assert!(fs::read_dir(&root).unwrap().next().is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn reads_kernel_groups_from_config() {
+        let paths = crate::modules::app_paths::get();
         let groups = read_kernel_groups(
-            &kernels_config(),
-            &kernels_dir()
-        ).unwrap();
+            paths.kernel_manifest(),
+            paths.kernels(),
+        )
+        .unwrap();
 
         assert!(!groups.is_empty());
         assert!(groups.iter().any(|group| group.id == "base_kernels" && group.required));
         assert!(groups.iter().any(|group| group.id == "inner_solar_system" && group.required));
         assert!(groups.iter().all(|group| !group.kernels.is_empty()));
         assert!(groups.iter().flat_map(|group| &group.kernels).all(|kernel| {
-            kernel.url.as_str().starts_with(NAIF_GENERIC_KERNELS_URL)
-                && kernel.destination.ends_with(&kernel.relative_path)
+            kernel.url.scheme() == "https" && kernel.destination.ends_with(&kernel.relative_path)
         }));
+    }
+
+    #[test]
+    fn explicit_download_url_overrides_generic_location() {
+        let base_url = reqwest::Url::parse(NAIF_GENERIC_KERNELS_URL).unwrap();
+        let downloads = build_downloads(
+            [(
+                "pck/local-name.tpc".to_string(),
+                Some("https://example.com/source.tpc".to_string()),
+            )],
+            Path::new("kernels"),
+            &base_url,
+        )
+        .unwrap();
+
+        assert_eq!(downloads[0].relative_path, Path::new("pck/local-name.tpc"));
+        assert_eq!(downloads[0].url.as_str(), "https://example.com/source.tpc");
     }
 
     #[test]
@@ -782,34 +836,19 @@ kernels = [{ file = "spk/optional.bsp", time_bounds = ["2000-01-01", "2001-01-01
         fs::remove_dir_all(root).unwrap();
     }
 
-    // #[test]
-    // fn configured_kernels_have_remote_headers() {
-    //     let client = create_client().unwrap();
+    #[test]
+    #[ignore = "requires network access"]
+    fn configured_kernel_urls_are_available() {
+        let client = create_client().unwrap();
+        let paths = crate::modules::app_paths::get();
+        let groups = read_kernel_groups(paths.kernel_manifest(), paths.kernels()).unwrap();
+        let mut failures = Vec::new();
 
-    //     let groups = read_kernel_groups(
-    //         &kernels_config(),
-    //         &kernels_dir()
-    //     ).unwrap();
-
-    //     for kernel in groups.iter().flat_map(|group| &group.kernels) {
-    //         let header = get_kernel_header(&client, kernel)
-    //             .unwrap_or_else(|error| panic!("{}: {}", kernel.relative_path.display(), error));
-    //         assert!(
-    //             header.content_length.is_some_and(|bytes| bytes > 0),
-    //             "{} has no Content-Length header",
-    //             kernel.relative_path.display(),
-    //         );
-    //         assert!(
-    //             header.last_modified.is_some(),
-    //             "{} has no Last-Modified header",
-    //             kernel.relative_path.display(),
-    //         );
-    //         assert_eq!(
-    //             header.accept_ranges.as_deref(),
-    //             Some("bytes"),
-    //             "{} does not advertise byte ranges",
-    //             kernel.relative_path.display(),
-    //         );
-    //     }
-    // }
+        for kernel in groups.iter().flat_map(|group| &group.kernels) {
+            if let Err(error) = get_kernel_header(&client, kernel) {
+                failures.push(format!("{}: {}", kernel.relative_path.display(), error));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
 }

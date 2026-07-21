@@ -8,7 +8,7 @@ use winit::{
 };
 
 use crate::modules::{projection_3d::{pipelines::common::create_render_pipeline_default, simulation, state::Vec3d, window_core::{camera::{self, Camera, CameraController, CameraUniform, Projection}, hdr::HdrPipeline, light::LightUniform, model::{self, DrawLight, Model, Vertex}, texture::{self, Texture}}}, utils};
-use crate::modules::spice_ker::{self, GroupInfoShort};
+use crate::modules::spice_ker;
 use super::super::super::pipelines::{orbit, celestial_marker, closest_approach, body, trajectory};
 
 use crate::modules::projection_3d::traj::ProximityReference;
@@ -99,6 +99,7 @@ pub struct AppState {
     pub(crate) fps_display: f64,
     fps_update_timer: std::time::Instant,
     pub(crate) return_to_kernel_setup: bool,
+    kernel_manifest: std::path::PathBuf,
     pub(crate) show_settings: bool,
     // Small-body (SBDB) manager UI state
     pub(crate) show_sb_manager: bool,
@@ -141,14 +142,8 @@ pub struct AppState {
 
     pub(crate) settings_loaded: bool,
     pub(crate) settings_dirty: bool,
-    /// for kernel settings UI
-    pub(crate) kernel_group_selection: Vec<GroupInfoShort>,
-    pub(crate) kernel_reload_error: Option<String>,
-    pub(crate) kernel_reload_pending: bool,
     /// populated from settings.toml
     pub(crate) groups_to_load: Vec<String>,
-
-    pub(crate) show_advanced_kernel_options: bool,
     /// group_id -> Vec of selected file indices
     pub(crate) advanced_kernel_selections: std::collections::HashMap<String, Vec<usize>>,
 }
@@ -319,6 +314,7 @@ impl AppState {
 
         let mut simulation = Simulation::new_with_kernel_selection(
             CoordSystem::BodyCentric,
+            &kernel_selection.manifest_path,
             &kernel_selection.groups,
             &kernel_selection.files,
         ).map_err(anyhow::Error::msg)?;
@@ -652,6 +648,7 @@ impl AppState {
             fps_display: 0.0,
             fps_update_timer: std::time::Instant::now(),
             return_to_kernel_setup: false,
+            kernel_manifest: kernel_selection.manifest_path.clone(),
             show_settings: false,
             show_sb_manager: false,
             sb_download_id_input: String::new(),
@@ -691,18 +688,7 @@ impl AppState {
             now_button_highlighted: true,
             settings_loaded: false,
             settings_dirty: false,
-            kernel_group_selection: spice_ker::get_all_group_infos_short()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|mut info| {
-                    info.is_loaded = kernel_selection.groups.contains(&info.id);
-                    info
-                })
-                .collect(),
-            kernel_reload_error: None,
-            kernel_reload_pending: false,
             groups_to_load: kernel_selection.groups,
-            show_advanced_kernel_options: false,
             advanced_kernel_selections: kernel_selection.files,
             cached_trajectory_flyby: None,
         };
@@ -876,8 +862,12 @@ impl AppState {
         ui::update_gui(self);
     }
 
-    pub fn take_kernel_setup_request(&mut self) -> bool {
-        std::mem::take(&mut self.return_to_kernel_setup)
+    pub fn kernel_setup_request(&mut self) -> Option<std::path::PathBuf> {
+        if self.return_to_kernel_setup {
+            self.return_to_kernel_setup = false;
+            return Some(self.kernel_manifest.clone());
+        } 
+        None
     }
 
     pub fn update(&mut self, dt: std::time::Duration) {
