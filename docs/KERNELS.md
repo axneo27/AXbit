@@ -33,26 +33,35 @@ kernels = [
 
 Kernels are grouped roughly by planetary system — `inner_solar_system`, `jupiter`, `saturn`, `uranus`, `neptune`, `pluto` — mostly so you can load only what you need instead of every SPK at once. Each entry needs:
 
-- `file` — path relative to `spice-tools/kernels/`
+- `file` — path relative to the kernels directory shown by the setup screen
+- `download_url` — optional absolute source URL; without it AXbit uses the corresponding path under NAIF `generic_kernels/`
 - `time_bounds` — validity window, UTC ISO format
 - `ids` — NAIF body IDs this kernel covers
 
+The local path and remote source are intentionally independent:
+
+```toml
+{ file = "pck/mission.tpc", download_url = "https://naif.jpl.nasa.gov/pub/naif/MISSION/kernels/pck/mission.tpc" }
+```
+
 ## Adding your own kernels
 
-1. Drop the kernel file into `spice-tools/kernels/` (e.g. `spk/satellites/` for a satellite SPK).
-2. Regenerate the manifest:
+1. In development, put kernel files under `spice-tools/kernels/`. For a release build, prepare them in any staging directory and later copy them into the kernels directory displayed by AXbit.
+2. Regenerate the manifest, passing `--kernels-dir` when using a staging directory:
 
 ```bash
 .venv/bin/python scripts/update_kernels_manifest.py
 ```
 
-Or, to keep your current `kernels.toml` intact and write elsewhere:
+Or, to keep your current `kernels.toml` intact and create a custom manifest:
 
 ```bash
-.venv/bin/python scripts/update_kernels_manifest.py --input my-kernels.toml --output kernels.toml
+.venv/bin/python scripts/update_kernels_manifest.py --input my-kernels.toml --output custom-kernels.toml
 ```
 
 Fair warning: this overwrites `kernels.toml` in place unless you pass `--output`.
+
+Choose the resulting TOML file with **Choose manifest…** on the kernel setup screen. Kernel files still belong under the kernels directory displayed there. AXbit can download entries that have a valid generic path or an explicit `download_url`; entries without a usable URL may simply be copied into that directory.
 
 Under the hood, the script leans on `spiceypy`:
 
@@ -95,8 +104,12 @@ pub fn time_span(&self) -> (f64, f64) {
 
 If simulation time drifts outside this range, it gets clamped rather than erroring out.
 
-## Rough edges
+## URL validation
 
-- Kernel groups are fixed at whatever's in `kernels.toml`; there's no dynamic discovery of what's on disk.
+Use **Test all URLs** on the setup screen to issue HEAD requests for every manifest entry. The result appears beside each file and does not affect locally available files. Maintainers can run the equivalent network test with:
+
+```bash
+cargo test configured_kernel_urls_are_available -- --ignored
+```
 
 ---

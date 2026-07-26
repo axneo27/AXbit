@@ -8,7 +8,7 @@ use serde::Deserialize;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
-use crate::modules::kernel_downloader::{
+use crate::modules::kernel_manager::{
     self, KernelDirectoryReport, KernelDownload, KernelDownloadGroup, KernelDownloadResume,
 };
 
@@ -27,6 +27,8 @@ const SETUP_BACKGROUND: wgpu::Color = wgpu::Color {
 /// Kernel groups and files that should be loaded when the simulation starts.
 #[derive(Debug, Clone, Default)]
 pub struct KernelStartupSelection {
+    /// e.g. kernels.toml or custom manifest path
+    pub manifest_path: PathBuf,
     /// Active group IDs. Base kernels are loaded separately and are not included.
     pub groups: Vec<String>,
     /// Group ID to selected manifest-file indices.
@@ -38,6 +40,23 @@ enum DownloadEvent {
     Progress(PathBuf, u64, Option<u64>),
     /// Path and the final downloaded byte count or error message.
     Finished(PathBuf, Result<u64, String>),
+    /// Path and the optional byte count returned by a HEAD request.
+    HeadSize(PathBuf, Result<Option<u64>, String>),
+    UrlTest(PathBuf, Result<Option<u64>, String>),
+}
+
+/// Checking if file really exists on NAIF site
+enum UrlTestState {
+    Checking,
+    Available,
+    Failed(String),
+}
+
+/// 2 steps just in case
+#[derive(Clone, Copy)]
+enum DeleteAllConfirmation {
+    First,
+    Final,
 }
 
 #[derive(Default)]
@@ -52,8 +71,10 @@ struct DownloadTransferState {
 struct KernelSetupFile {
     download: KernelDownload,
     local_state: KernelLocalState,
+    size: Option<u64>,
     selected: bool,
     download_state: Option<DownloadTransferState>,
+    url_test: Option<UrlTestState>,
 }
 
 struct KernelSetupGroup {
@@ -72,8 +93,10 @@ impl KernelSetupGroup {
             .map(|download| KernelSetupFile {
                 download,
                 local_state: KernelLocalState::Missing,
+                size: None,
                 selected: true,
                 download_state: None,
+                url_test: None,
             })
             .collect::<Vec<KernelSetupFile>>();
 
@@ -103,7 +126,6 @@ struct SavedKernelSelection {
     kernel_file_selections: HashMap<String, Vec<usize>>,
 }
 
-///
 pub struct KernelSetupState {
     // Only used before the simulation starts.
     surface: wgpu::Surface<'static>,
@@ -117,6 +139,7 @@ pub struct KernelSetupState {
     groups: Vec<KernelSetupGroup>,
     integrity_report: Option<KernelDirectoryReport>,
     fatal_error: Option<String>,
+    manifest_path: PathBuf,
 
     // e.g. file 4 waits here while files 1-3 are downloading.
     download_client: Option<reqwest::blocking::Client>,
@@ -125,12 +148,25 @@ pub struct KernelSetupState {
     download_event_tx: mpsc::Sender<DownloadEvent>,
     download_event_rx: mpsc::Receiver<DownloadEvent>,
 
+    pending_deletion: Option<KernelDownload>,
+    delete_all_confirmation: Option<DeleteAllConfirmation>,
     start_requested: bool,
 }
 
 impl KernelSetupState {
-    /// Builds the setup screen and loads the kernel data (+ integrity checks).
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
+        Self::new_with_manifest(
+            window,
+            crate::modules::app_paths::get().kernel_manifest().to_path_buf(),
+        )
+        .await
+    }
+
+    /// Builds the setup screen and loads the kernel data (+ integrity checks).
+    pub async fn new_with_manifest(
+        window: Arc<Window>,
+        manifest_path: PathBuf,
+    ) -> anyhow::Result<Self> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
@@ -193,11 +229,14 @@ impl KernelSetupState {
             groups: Vec::new(),
             integrity_report: None,
             fatal_error: None,
+            manifest_path,
             download_client: None,
             pending_downloads: VecDeque::new(),
             running_download_paths: Vec::new(),
             download_event_tx,
             download_event_rx,
+            pending_deletion: None,
+            delete_all_confirmation: None,
             start_requested: false,
         };
         state.load_catalog();
@@ -205,14 +244,14 @@ impl KernelSetupState {
         Ok(state)
     }
 
-    /// Called once on startup: load kernels.toml, saved choices, and local file states.
+    /// Loads the active manifest, saved choices, and local file states.
     fn load_catalog(&mut self) {
         self.fatal_error = None;
+        self.groups.clear();
+        self.integrity_report = None;
 
-        match kernel_downloader::read_kernel_groups(
-            &kernel_downloader::kernels_config(),
-            &kernel_downloader::kernels_dir(),
-        ) {
+        let kernels_path = crate::modules::app_paths::get().kernels();
+        match kernel_manager::read_kernel_groups(&self.manifest_path, kernels_path) {
             Ok(groups) => {
                 self.groups = groups
                     .into_iter()
@@ -228,15 +267,20 @@ impl KernelSetupState {
 
         self.scan_integrity();
 
-        match kernel_downloader::create_client() {
-            Ok(client) => self.download_client = Some(client),
+        match kernel_manager::create_client() {
+            Ok(client) => {
+                self.download_client = Some(client);
+                self.request_missing_sizes();
+            }
             Err(error) => self.fatal_error = Some(error.to_string()),
         }
     }
 
-    /// Only reads the kernel fields from `data/settings.toml`.
+    /// Only reads the kernel fields from the application settings file.
     fn restore_saved_selection(&mut self) {
-        let Ok(contents) = std::fs::read_to_string("data/settings.toml") else {
+        let Ok(contents) =
+            std::fs::read_to_string(crate::modules::app_paths::get().settings())
+        else {
             return;
         };
         let Ok(saved) = toml::from_str::<SavedKernelSelection>(&contents) else {
@@ -266,14 +310,21 @@ impl KernelSetupState {
 
     /// e.g. after a download, refresh Ready/Missing/Empty/Interrupted for every file.
     fn scan_integrity(&mut self) {
-        match kernel_downloader::verify_kernel_dir_integrity(
-            &kernel_downloader::kernels_config(),
-            &kernel_downloader::kernels_dir(),
+        let kernels_path = crate::modules::app_paths::get().kernels();
+        match kernel_manager::verify_kernel_dir_integrity(
+            &self.manifest_path,
+            kernels_path,
         ) {
             Ok(report) => {
                 for group in &mut self.groups {
                     for file in &mut group.files {
                         file.local_state = local_state_from_report(&report, &file.download);
+                        file.size = match file.local_state {
+                            KernelLocalState::Ready | KernelLocalState::Empty => {
+                                filesystem_size(&file.download.destination)
+                            }
+                            KernelLocalState::Interrupted | KernelLocalState::Missing => None,
+                        };
                     }
                 }
 
@@ -281,6 +332,34 @@ impl KernelSetupState {
                 self.fatal_error = None;
             }
             Err(error) => self.fatal_error = Some(error.to_string()),
+        }
+    }
+
+    fn request_missing_sizes(&self) {
+        let Some(client) = &self.download_client else {
+            return;
+        };
+        let downloads = self
+            .groups
+            .iter()
+            .flat_map(|group| group.files.iter())
+            .filter(|file| {
+                file.size.is_none()
+                    && matches!(file.local_state, KernelLocalState::Missing | KernelLocalState::Interrupted)
+            })
+            .map(|file| file.download.clone())
+            .collect::<Vec<_>>();
+
+        for download in downloads {
+            let client = client.clone();
+            let event_tx = self.download_event_tx.clone();
+            std::thread::spawn(move || {
+                // to not block the ui thread
+                let result = kernel_manager::get_kernel_header(&client, &download)
+                    .map(|header| header.content_length)
+                    .map_err(|error| error.to_string());
+                let _ = event_tx.send(DownloadEvent::HeadSize(download.relative_path, result));
+            });
         }
     }
 
@@ -328,6 +407,24 @@ impl KernelSetupState {
                         }
                     }
                     integrity_changed = true;
+                }
+                DownloadEvent::HeadSize(path, result) => {
+                    if let Some(file) = self.find_file_by_path_mut(&path) {
+                        file.size = result.ok().flatten();
+                    }
+                }
+                DownloadEvent::UrlTest(path, result) => {
+                    if let Some(file) = self.find_file_by_path_mut(&path) {
+                        match result {
+                            Ok(size) => {
+                                file.url_test = Some(UrlTestState::Available);
+                                if file.size.is_none() {
+                                    file.size = size;
+                                }
+                            }
+                            Err(error) => file.url_test = Some(UrlTestState::Failed(error)),
+                        }
+                    }
                 }
             }
         }
@@ -411,12 +508,12 @@ impl KernelSetupState {
                     ));
                 };
                 let result = match resume {
-                    Some(resume) => kernel_downloader::resume_download_kernel(
+                    Some(resume) => kernel_manager::resume_download_kernel(
                         &worker_client,
                         &resume,
                         &mut report_progress,
                     ),
-                    None => kernel_downloader::download_kernel(
+                    None => kernel_manager::download_kernel(
                         &worker_client,
                         &kernel,
                         &mut report_progress,
@@ -475,6 +572,24 @@ impl KernelSetupState {
 
         for kernel in kernels {
             self.queue_download(kernel);
+        }
+    }
+
+    fn test_all_urls(&mut self) {
+        let Some(client) = &self.download_client else {
+            return;
+        };
+        for file in self.groups.iter_mut().flat_map(|group| &mut group.files) {
+            file.url_test = Some(UrlTestState::Checking);
+            let client = client.clone();
+            let download = file.download.clone();
+            let event_tx = self.download_event_tx.clone();
+            std::thread::spawn(move || {
+                let result = kernel_manager::get_kernel_header(&client, &download)
+                    .map(|header| header.content_length)
+                    .map_err(|error| error.to_string());
+                let _ = event_tx.send(DownloadEvent::UrlTest(download.relative_path, result));
+            });
         }
     }
 
@@ -539,7 +654,10 @@ impl KernelSetupState {
         }
         self.start_requested = false;
 
-        let mut selection = KernelStartupSelection::default();
+        let mut selection = KernelStartupSelection {
+            manifest_path: self.manifest_path.clone(),
+            ..Default::default()
+        };
         for group in &self.groups {
             if group.id == "base_kernels" || !group.active {
                 continue;
@@ -576,9 +694,15 @@ impl KernelSetupState {
         self.egui_renderer.begin_frame(&self.window);
         let ctx = self.egui_renderer.context().clone();
         let mut requested_downloads: Vec<KernelDownload> = Vec::new();
+        let mut requested_deletion = None;
         let mut download_required_clicked = false;
         let mut recheck_clicked = false;
+        let mut test_urls_clicked = false;
+        let mut choose_manifest_clicked = false;
+        let mut use_default_manifest_clicked = false;
+        let mut delete_all_clicked = false;
         let mut start_clicked = false;
+        let kernels_dir = crate::modules::app_paths::get().kernels();
         let running_paths: Vec<PathBuf> = self.running_download_paths.clone();
         let queued_paths: Vec<PathBuf> = self
             .pending_downloads
@@ -590,6 +714,7 @@ impl KernelSetupState {
         let downloads_active = self.downloads_active();
         let running_count = self.running_download_paths.len();
         let queued_count = self.pending_downloads.len();
+        let deletion_pending = self.pending_deletion.is_some();
 
         // Buttons only record actions here; we apply them after egui releases its borrows.
         egui::CentralPanel::default().show(&ctx, |ui| {
@@ -597,6 +722,33 @@ impl KernelSetupState {
             ui.vertical_centered(|ui| {
                 ui.heading("SPICE Kernel Setup");
                 ui.label("Choose the kernel data available to this simulation.");
+                ui.label(
+                    egui::RichText::new(format!("Kernels directory: {}", kernels_dir.display()))
+                        .weak(),
+                );
+                ui.label(
+                    egui::RichText::new(format!("Manifest: {}", self.manifest_path.display()))
+                        .weak(),
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!downloads_active, egui::Button::new("Choose manifest…"))
+                        .clicked()
+                    {
+                        choose_manifest_clicked = true;
+                    }
+                    let using_default =
+                        self.manifest_path == crate::modules::app_paths::get().kernel_manifest();
+                    if ui
+                        .add_enabled(
+                            !downloads_active && !using_default,
+                            egui::Button::new("Use default manifest"),
+                        )
+                        .clicked()
+                    {
+                        use_default_manifest_clicked = true;
+                    }
+                });
             });
             ui.add_space(12.0);
 
@@ -678,6 +830,31 @@ impl KernelSetupState {
                                         running_paths.contains(&file.download.relative_path),
                                         queued_paths.contains(&file.download.relative_path),
                                     );
+                                    if let Some(size) = file.size {
+                                        ui.weak(format!("Size: {}", format_bytes(size)));
+                                    }
+                                    if let Some(status) = &file.url_test {
+                                        match status {
+                                            UrlTestState::Checking => {
+                                                ui.horizontal(|ui| {
+                                                    ui.spinner();
+                                                    ui.weak("Testing URL…");
+                                                });
+                                            }
+                                            UrlTestState::Available => {
+                                                ui.colored_label(
+                                                    egui::Color32::LIGHT_GREEN,
+                                                    "URL available",
+                                                );
+                                            }
+                                            UrlTestState::Failed(error) => {
+                                                ui.colored_label(
+                                                    egui::Color32::LIGHT_RED,
+                                                    format!("URL failed: {error}"),
+                                                );
+                                            }
+                                        }
+                                    }
                                 });
 
                                 let action_label = if file
@@ -698,6 +875,14 @@ impl KernelSetupState {
                                 {
                                     requested_downloads.push(file.download.clone());
                                 }
+                                if file.local_state != KernelLocalState::Missing
+                                    && !deletion_pending
+                                    && !running_paths.contains(&file.download.relative_path)
+                                    && !queued_paths.contains(&file.download.relative_path)
+                                    && ui.small_button("Delete").clicked()
+                                {
+                                    requested_deletion = Some(file.download.clone());
+                                }
                             });
                         }
                     });
@@ -714,6 +899,18 @@ impl KernelSetupState {
             ui.horizontal(|ui| {
                 if ui.button("Recheck").clicked() {
                     recheck_clicked = true;
+                }
+                if ui.button("Test all URLs").clicked() {
+                    test_urls_clicked = true;
+                }
+                if ui
+                    .add_enabled(
+                        !downloads_active,
+                        egui::Button::new("Delete all kernel files"),
+                    )
+                    .clicked()
+                {
+                    delete_all_clicked = true;
                 }
                 if downloads_active {
                     ui.spinner();
@@ -735,17 +932,144 @@ impl KernelSetupState {
             });
         });
 
+        if requested_deletion.is_some() {
+            self.pending_deletion = requested_deletion.take();
+        }
+        if delete_all_clicked {
+            self.delete_all_confirmation = Some(DeleteAllConfirmation::First);
+        }
+        let mut confirm_deletion = false;
+        let mut cancel_deletion = false;
+        if let Some(kernel) = self.pending_deletion.as_ref() {
+            let path = kernel.relative_path.display().to_string();
+            egui::Window::new("Delete kernel file?")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(&ctx, |ui| {
+                    ui.colored_label(egui::Color32::YELLOW, "Warning: this file will be deleted from disk.");
+                    ui.label(path);
+                    ui.horizontal(|ui| {
+                        if ui.button("Delete").clicked() {
+                            confirm_deletion = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            cancel_deletion = true;
+                        }
+                    });
+                });
+        }
+        if confirm_deletion {
+            requested_deletion = self.pending_deletion.take();
+        } else if cancel_deletion {
+            self.pending_deletion = None;
+        }
+
+        let mut advance_delete_all = false;
+        let mut confirm_delete_all = false;
+        let mut cancel_delete_all = false;
+        match self.delete_all_confirmation {
+            Some(DeleteAllConfirmation::First) => {
+                egui::Window::new("Delete all kernel files?")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .show(&ctx, |ui| {
+                        ui.colored_label(
+                            egui::Color32::YELLOW,
+                            "This deletes every file inside the kernels directory, including files not listed in the manifest.",
+                        );
+                        ui.label(kernels_dir.display().to_string());
+                        ui.horizontal(|ui| {
+                            if ui.button("OK, continue").clicked() {
+                                advance_delete_all = true;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                cancel_delete_all = true;
+                            }
+                        });
+                    });
+            }
+            Some(DeleteAllConfirmation::Final) => {
+                egui::Window::new("Final deletion confirmation")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .show(&ctx, |ui| {
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            egui::RichText::new("ARE YOU SURE?").strong().size(22.0),
+                        );
+                        ui.label("All downloaded and manually added kernel files will be permanently deleted.");
+                        ui.horizontal(|ui| {
+                            if ui.button("Yes, delete everything").clicked() {
+                                confirm_delete_all = true;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                cancel_delete_all = true;
+                            }
+                        });
+                    });
+            }
+            None => {}
+        }
+        if advance_delete_all {
+            self.delete_all_confirmation = Some(DeleteAllConfirmation::Final);
+        } else if cancel_delete_all || confirm_delete_all {
+            self.delete_all_confirmation = None;
+        }
+
         self.start_requested = start_clicked;
 
         // e.g. a Download click reaches the pending queue here.
         if download_required_clicked {
             self.queue_required_downloads();
         }
+        if test_urls_clicked {
+            self.test_all_urls();
+        }
+        if use_default_manifest_clicked {
+            self.manifest_path = crate::modules::app_paths::get()
+                .kernel_manifest()
+                .to_path_buf();
+            self.load_catalog();
+        } else if choose_manifest_clicked {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("TOML manifest", &["toml"])
+                .pick_file()
+            {
+                self.manifest_path = path;
+                self.load_catalog();
+            }
+        }
         for kernel in requested_downloads {
             self.queue_download(kernel);
         }
-        if recheck_clicked {
+        let mut deletion_error = None;
+        if confirm_delete_all {
+            if let Err(error) = kernel_manager::delete_kernel_directory_contents(kernels_dir) {
+                deletion_error = Some(error.to_string());
+            }
+            for file in self.groups.iter_mut().flat_map(|group| &mut group.files) {
+                file.download_state = None;
+                file.url_test = None;
+            }
             self.scan_integrity();
+            self.request_missing_sizes();
+        } else if let Some(kernel) = requested_deletion {
+            if let Err(error) = kernel_manager::delete_kernel_files(&kernel) {
+                deletion_error = Some(error.to_string());
+            }
+            if let Some(file) = self.find_file_by_path_mut(&kernel.relative_path) {
+                file.download_state = None;
+            }
+            self.scan_integrity();
+            self.request_missing_sizes();
+        } else if recheck_clicked {
+            self.scan_integrity();
+        }
+        if let Some(error) = deletion_error {
+            self.fatal_error = Some(error);
         }
 
         // Clear the window, draw egui, then present this startup frame.
@@ -902,4 +1226,11 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{} B", bytes)
     }
+}
+
+fn filesystem_size(path: &Path) -> Option<u64> {
+    std::fs::metadata(path)
+        .ok()
+        .filter(|metadata| metadata.is_file())
+        .map(|metadata| metadata.len())
 }

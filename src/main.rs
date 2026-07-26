@@ -33,9 +33,10 @@ pub mod modules {
     }
     pub mod tests;
     pub mod utils;
+    pub mod app_paths;
     pub mod sbdb;
     pub mod kernel_config;
-    pub mod kernel_downloader;
+    pub mod kernel_manager;
     pub mod spice_bindings;
     pub mod spice_ker;
 }
@@ -46,6 +47,10 @@ fn main() {
     dotenv().ok();
 
     env_logger::init();
+    if let Err(e) = modules::app_paths::init() {
+        eprintln!("Failed to initialize application paths: {e:#}");
+        return;
+    }
     if let Err(e) = run() {
         eprintln!("Error: {}", e);
     }

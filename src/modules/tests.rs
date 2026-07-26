@@ -157,6 +157,7 @@ mod spice_tests {
     }
 
     #[test]
+    #[ignore = "Run this manually. Not with other tests."]
     fn dump_loaded_body_ids_with_gm_to_file() {
         let Some(_g) = spice_setup() else { return };
 

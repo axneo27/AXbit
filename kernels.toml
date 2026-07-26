@@ -6,13 +6,12 @@
 kernels = [
     { file = "lsk/naif0012.tls" }, # Leap seconds kernel 
 
-    { file = "pck/cpck_rock_21Jan2011.tpc" },
+    { file = "pck/pck00011.tpc" },
     { file = "pck/gm_de440.tpc" },
-    { file = "pck/juice_jup012.tpc" },
     { file = "pck/moon_pa_de440_200625.bpc"},
-    { file = "pck/de403_masses.tpc" },
-    { file = "pck/nh_pcnh_006.tpc"},
-    { file = "pck/pck00011.tpc" } 
+    { file = "pck/cpck_rock_21Jan2011.tpc", download_url = "https://naif.jpl.nasa.gov/pub/naif/CASSINI/kernels/pck/cpck_rock_21Jan2011.tpc" },
+    { file = "pck/juice_jup012.tpc", download_url = "https://naif.jpl.nasa.gov/pub/naif/JUICE/kernels/pck/juice_jup012.tpc" },
+    { file = "pck/nh_pcnh_010.tpc", download_url = "https://naif.jpl.nasa.gov/pub/naif/pds/data/nh-j_p_ss-spice-6-v1.0/nhsp_1000/data/pck/nh_pcnh_010.tpc" },
 ]
 
 [groups.inner_solar_system]
@@ -55,7 +54,7 @@ kernels = [
 [groups.neptune]
 name = "Neptune"
 kernels = [
-    { file = "spk/satellites/nep095.bsp", time_bounds = ["1900-01-01T00:00:00Z", "2050-01-01T00:00:00Z"], ids = [[3, 3], [8, 8], [10, 10], [399, 399], [801, 808], [814, 814], [899, 899]] },
+    { file = "spk/satellites/nep095.bsp", download_url = "https://naif.jpl.nasa.gov/pub/naif/pds/wgc/kernels/spk/nep095.bsp", time_bounds = ["1900-01-01T00:00:00Z", "2050-01-01T00:00:00Z"], ids = [[3, 3], [8, 8], [10, 10], [399, 399], [801, 808], [814, 814], [899, 899]] },
     { file = "spk/satellites/nep104.bsp", time_bounds = ["1600-01-03T23:59:19Z", "2399-12-24T23:58:51Z"], ids = [[3, 3], [8, 8], [10, 10], [399, 399], [809, 813], [899, 899], [85051, 85052]] },
 ]
 

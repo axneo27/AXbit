@@ -6,8 +6,7 @@ use crate::modules::projection_3d::window_core::{model, texture};
 
 pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
     let txt = {
-        let path = std::path::Path::new(env!("OUT_DIR"))
-            .join("res")
+        let path = crate::modules::app_paths::get().resources()
             .join(file_name);
         std::fs::read_to_string(path)?
     };
@@ -17,8 +16,7 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
 
 pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
     let data = {
-        let path = std::path::Path::new(env!("OUT_DIR"))
-            .join("res")
+        let path = crate::modules::app_paths::get().resources()
             .join(file_name);
         std::fs::read(path)?
     };
@@ -348,4 +346,3 @@ impl HdrLoader {
         Ok(dst)
     }
 }
-
