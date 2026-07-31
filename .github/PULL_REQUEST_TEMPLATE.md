@@ -31,7 +31,6 @@ Visual changes: before/after images.
 
 ## Checklist
 - [ ] Branch is focused enough to review as one change
-- [ ] Ran `cargo fmt --check`, `cargo clippy`, `cargo test` (or explained why not, above)
 - [ ] Added/updated tests or validation where needed
 - [ ] Updated `docs/KERNELS.md` / `docs/ACCURACY.md` where relevant
 - [ ] No SPICE kernels, database files, credentials, or stray binaries committed

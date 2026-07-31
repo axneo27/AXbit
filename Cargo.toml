@@ -2,6 +2,10 @@
 name = "AXbit"
 version = "0.1.0"
 edition = "2024"
+description = "An experimental visual astrodynamics lab for SPICE/SBDB-based solar-system exploration"
+license = "Apache-2.0"
+repository = "https://github.com/axneo27/AXbit"
+homepage = "https://github.com/axneo27/AXbit"
 
 build = "build.rs"
 
@@ -49,9 +53,14 @@ fs_extra = "1.2"
 cc = "1.0"
 
 [package.metadata.packager]
+product-name = "AXbit"
 identifier = "com.axneo27.AXbit"
-before-each-package-command = "cargo build --release --features packaged"
+before-each-package-command = "cargo build --release --features packaged --locked"
+formats = ["app"]
+out-dir = "app"
 resources = [
+    { src = "LICENSE", target = "LICENSE" },
+    { src = "THIRD_PARTY_NOTICES.md", target = "THIRD_PARTY_NOTICES.md" },
     { src = "kernels.toml", target = "kernels.toml" },
-    { src = "src/modules/projection_3d/res", target = "res" },
+    { src = "src/modules/projection_3d/res/sphere.obj", target = "res/sphere.obj" },
 ]

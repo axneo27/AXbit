@@ -82,9 +82,9 @@ It's a reasonable starting point, not a considered choice for any particular use
 
 - Time bounds may be stale relative to newer kernel releases.
 - Kernels were picked for general availability, not for what you're actually simulating.
-- Several bodies have more than one kernel that covers them, and we didn't audit which is "best" for a given purpose.
+- Several bodies have more than one kernel that covers them; the best kernel for each purpose has not been audited.
 
-If you need something more precise, grab a newer kernel from NAIF's [anonymous FTP](https://naif.jpl.nasa.gov/pub/naif/) (specifically [`generic_kernels/`](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/) for SPK/PCK/CK) and regenerate the manifest. If you find a better default configuration, open an issue or a PR with arguments — we'd rather ship something people have actually vetted.
+If you need something more precise, grab a newer kernel from NAIF's [anonymous FTP](https://naif.jpl.nasa.gov/pub/naif/) (specifically [`generic_kernels/`](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/) for SPK/PCK/CK) and regenerate the manifest. If you find a better default configuration, open an issue or a PR. 
 
 ## How time bounds combine
 

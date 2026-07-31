@@ -1,0 +1,27 @@
+name: Set up CSPICE for macOS arm64
+description: Install the official NAIF Apple Silicon CSPICE toolkit
+
+runs:
+  using: composite
+  steps:
+    - name: Download CSPICE and validate archive layout
+      shell: bash
+      env:
+        CSPICE_DIR: spice-tools/cspice
+        CSPICE_URL: https://naif.jpl.nasa.gov/pub/naif/toolkit/C/MacM1_OSX_clang_64bit/packages/cspice.tar.Z
+      run: |
+        set -euo pipefail
+
+        test "$(uname -m)" = "arm64"
+        archive="$RUNNER_TEMP/cspice.tar.Z"
+
+        curl --fail --location --retry 3 --output "$archive" "$CSPICE_URL"
+        mkdir -p spice-tools
+        tar -xf "$archive" -C spice-tools
+
+        test -f "$CSPICE_DIR/include/SpiceUsr.h"
+        test -f "$CSPICE_DIR/lib/cspice.a"
+        test -f "$CSPICE_DIR/lib/csupport.a"
+
+        mv "$CSPICE_DIR/lib/cspice.a" "$CSPICE_DIR/lib/libcspice.a"
+        mv "$CSPICE_DIR/lib/csupport.a" "$CSPICE_DIR/lib/libcsupport.a"
