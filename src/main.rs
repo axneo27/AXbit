@@ -51,6 +51,10 @@ fn main() {
         eprintln!("Failed to initialize application paths: {e:#}");
         return;
     }
+    if let Err(e) = modules::sbdb::init_db() {
+        eprintln!("Failed to initialize database: {e:#}");
+        return;
+    }
     if let Err(e) = run() {
         eprintln!("Error: {}", e);
     }

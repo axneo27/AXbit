@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/dist/
 
 # C/C++ build artifacts
 *.o

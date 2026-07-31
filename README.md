@@ -59,6 +59,9 @@ SPICE *kernels* (the data files, separate from the CSPICE toolkit itself) aren't
 
 For notes on numerical methods and their limitations, see [Accuracy & Limitations](docs/ACCURACY.md).
 
+Versioned macOS downloads are published on the GitHub Releases page as .app.zip 
+file. Source builds and releases currently target Apple Silicon only.
+
 > [!NOTE]
 > **Platform support:** So far this has only been built and run on macOS (Apple Silicon). It hasn't been tested on Windows or Linux yet — if you try either, feedback is welcome.
 
@@ -112,7 +115,7 @@ Initially, this is a personal project, but contributions and feedback are welcom
 
 ## Acknowledgments
 
-AXbit uses the NASA/JPL SPICE toolkit (CSPICE) and NASA/JPL Small-Body Database (SBDB) data. We acknowledge the NAIF/SPICE team and the SBDB maintainers for their foundational work.
+AXbit uses the NASA/JPL SPICE toolkit (CSPICE) and NASA/JPL Small-Body Database (SBDB) data. The project acknowledges the NAIF/SPICE team and the SBDB maintainers for their foundational work.
 
 ## License
 
