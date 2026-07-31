@@ -31,6 +31,15 @@ A Discussion is a tool for reducing wasted work, yours most of all — not a gat
 ## Making changes
 
 - Keep PRs focused on one thing. A PR that fixes a bug and refactors an unrelated module is harder to review and harder to revert if something breaks.
+- Follow the existing style of the Rust file you are changing. Keep formatting
+  internally consistent, avoid unrelated formatting churn, and put readability
+  first—especially for numerical code, matrices, tables, and other layouts where
+  visual structure carries meaning. Repository-wide `rustfmt` enforcement is not
+  currently required. In the future, the project may consider enforcing it for
+  most files, keeping targeted exceptions where it reduces readability, and may
+  consider a one-time formatting pass to establish that baseline. No decision
+  has been made yet; such a change should be reviewed separately from functional
+  work.
 - Run the checks relevant to the change and describe what was tested in the pull
   request. `cargo test` is the baseline when the local CSPICE setup is available.
 - Tests that call SPICE need the base and inner-solar-system kernels described in `docs/KERNELS.md`. Without them, kernel-dependent tests print a skip message and the rest of the suite still runs.
