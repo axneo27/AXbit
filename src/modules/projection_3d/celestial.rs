@@ -8,6 +8,7 @@ use crate::modules::{sbdb, utils};
 use anyhow::{Result, Context};
 use super::traj::{PhysicalParams, KeplerianElts};
 use super::state::{StateVector, Vec3d};
+use std::write;
 
 #[derive(Clone)]
 pub struct NaifCelestial { 

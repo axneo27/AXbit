@@ -3,6 +3,7 @@ use chrono::DateTime;
 use libc::c_char;
 use log::{error, warn};
 use crate::modules::{spice_bindings, projection_3d::{state::{StateVector, Vec3d}}};
+use std::write;
 
 #[derive(Debug)]
 pub struct SpiceError(pub String);
