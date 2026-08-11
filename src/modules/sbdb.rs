@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 
+pub const SBDB_API_URL: &str = "https://ssd-api.jpl.nasa.gov/sbdb.api";
+
 pub fn init_db() -> Result<()> {
     let conn = open_db()?;
 
@@ -82,13 +84,18 @@ fn open_db() -> Result<Connection> {
 }
 
 pub fn fetch_sbdb_object(id: &str) -> Result<Value> {
-
-    let url = format!(
-        "https://ssd-api.jpl.nasa.gov/sbdb.api?spk={}&orbit-defs=true&full-prec=true&cd-epoch=true&phys-par=true&cov=src",
-        id
-    );
-
-    let resp = reqwest::blocking::get(&url)
+    let url = SBDB_API_URL;
+    let resp = reqwest::blocking::Client::new()
+        .get(url)
+        .query(&[
+            ("sstr", id),
+            ("orbit-defs", "true"),
+            ("full-prec", "true"),
+            ("cd-epoch", "true"),
+            ("phys-par", "true"),
+            ("cov", "src"),
+        ])
+        .send()
         .with_context(|| format!("request to {} failed", url))?
         .error_for_status()
         .with_context(|| "non-success status returned from SBDB")?
@@ -98,17 +105,86 @@ pub fn fetch_sbdb_object(id: &str) -> Result<Value> {
     Ok(resp)
 }
 
+pub fn search_sbdb_objects(search: &str) -> Result<Vec<SbdbSearchResult>> {
+    let search = search.trim();
+    if search.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let url = SBDB_API_URL;
+    let client = reqwest::blocking::Client::new();
+    let request = |search: &str| -> Result<(reqwest::StatusCode, Value)> {
+        let response = client
+            .get(url)
+            .query(&[("sstr", search), ("no-orbit", "true")])
+            .send()
+            .with_context(|| format!("request to {} failed", url))?;
+        let status = response.status();
+        let data = response
+            .json::<Value>()
+            .with_context(|| "failed to parse SBDB search response as JSON")?;
+        Ok((status, data))
+    };
+
+    let (mut status, mut data) = request(search)?;
+    if data["code"].as_str() == Some("200") && data["message"].as_str().is_some_and(|message| message.contains("not found")) {
+        (status, data) = request(&format!("{}*", search))?;
+    }
+
+    if let Some(list) = data["list"].as_array() {
+        return Ok(list.iter().filter_map(|object| {
+            let designation = object["pdes"].as_str()?.to_string();
+            let name = object["name"].as_str().unwrap_or(&designation).trim().to_string();
+
+            Some(SbdbSearchResult {
+                id: designation.clone(),
+                designation,
+                name,
+                description: None,
+            })
+        }).collect());
+    }
+
+    if let Some(object) = data.get("object") {
+        let designation = object["des"].as_str().unwrap_or(search).to_string();
+        let spk_id = object["spkid"].as_str().unwrap_or(&designation).to_string();
+        let name = object["fullname"].as_str().unwrap_or(&designation).trim().to_string();
+        let description = object["orbit_class"]["name"].as_str().map(str::to_string);
+
+        return Ok(vec![SbdbSearchResult {
+            id: spk_id,
+            designation,
+            name,
+            description,
+        }]);
+    }
+
+    if data["code"].as_str() == Some("200") && data["message"].as_str().is_some_and(|message| message.contains("not found")) {
+        return Ok(vec![]);
+    }
+
+    anyhow::bail!(
+        "SBDB search failed ({}): {}",
+        status,
+        data["message"].as_str().unwrap_or("unexpected response")
+    )
+}
+
 pub fn diameter_from_h_albedo_m(h: f64, albedo: f64) -> f64 {
     let d_km = 1329.6 / albedo.sqrt() * 10f64.powf(-0.2 * h);
     d_km * 1000.0
 }
 
-pub fn download_and_store_small_body(id: i32) -> Result<()> {
-    let id_str = id.to_string();
+pub fn download_and_store_small_body(search: &str) -> Result<i32> {
+    let obj = fetch_sbdb_object(search).context("failed to fetch from SBDB API")?;
+    let id = obj["object"]["spkid"]
+        .as_str()
+        .context("SBDB response did not include an SPK ID")?
+        .parse::<i32>()
+        .context("SBDB SPK ID is not a supported integer")?;
 
-    let obj = fetch_sbdb_object(&id_str).context("failed to fetch from SBDB API")?;
-
-    store_body_from_json(id, &obj)
+    store_body_from_json(id, &obj)?;
+    Ok(id)
 }
 
 pub fn store_body_from_json(id: i32, data: &Value) -> Result<()> {
@@ -332,7 +408,7 @@ pub fn list_downloaded_bodies() -> Result<Vec<DownloadedBodyInfo>> {
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, spk_id, des, fullname, neo, pha, source,
+            "SELECT id, spk_id, des, fullname, neo, pha, source, orbit_class_name,
                 epoch_jd, eccentricity, semi_major_axis_au, inclination_deg,
                 diameter_km, gm_km3_s2, h_magnitude, created_at, updated_at
          FROM celestial_bodies ORDER BY id",
@@ -349,15 +425,16 @@ pub fn list_downloaded_bodies() -> Result<Vec<DownloadedBodyInfo>> {
                 neo: row.get(4)?,
                 pha: row.get(5)?,
                 source: row.get(6)?,
-                epoch_jd: row.get(7)?,
-                eccentricity: row.get(8)?,
-                semi_major_axis_au: row.get(9)?,
-                inclination_deg: row.get(10)?,
-                diameter_km: row.get(11)?,
-                gm_km3_s2: row.get(12)?,
-                h_magnitude: row.get(13)?,
-                created_at: row.get(14)?,
-                updated_at: row.get(15)?,
+                orbit_class_name: row.get(7)?,
+                epoch_jd: row.get(8)?,
+                eccentricity: row.get(9)?,
+                semi_major_axis_au: row.get(10)?,
+                inclination_deg: row.get(11)?,
+                diameter_km: row.get(12)?,
+                gm_km3_s2: row.get(13)?,
+                h_magnitude: row.get(14)?,
+                created_at: row.get(15)?,
+                updated_at: row.get(16)?,
             })
         })
         .context("query execution failed")?
@@ -466,6 +543,7 @@ pub struct DownloadedBodyInfo {
     pub neo: bool,
     pub pha: bool,
     pub source: String,
+    pub orbit_class_name: String,
 
     // Orbital elements
     pub epoch_jd: Option<f64>,
@@ -480,4 +558,12 @@ pub struct DownloadedBodyInfo {
 
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct SbdbSearchResult {
+    pub id: String,
+    pub designation: String,
+    pub name: String,
+    pub description: Option<String>,
 }

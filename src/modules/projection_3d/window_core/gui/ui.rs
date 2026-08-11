@@ -10,6 +10,7 @@ use std::sync::mpsc;
 use serde::{Deserialize, Serialize};
 use toml;
 use crate::modules::projection_3d::traj::{Integrator, ProximityReference};
+use std::format;
 
 #[derive(Serialize, Deserialize, Default)]
 struct SavedSettings {
@@ -450,35 +451,105 @@ pub fn update_gui(state: &mut AppState) {
                 );
                 ui.separator();
 
-                ui.heading("Download SBDB by ID");
+                ui.heading("Search SBDB");
                 ui.horizontal(|ui| {
-                    ui.label("ID:");
-                    ui.text_edit_singleline(&mut state.sb_download_id_input);
-                    if ui.button("Download").clicked() {
-                        if state.sb_download_in_progress {
-                            state.sb_status = Some(
-                                "Download already in progress".to_string(),
-                            );
-                        } else if let Ok(id) = state.sb_download_id_input.trim().parse::<i32>() {
-                            let (tx, rx) = mpsc::channel::<Result<(), String>>();
-                            state.sb_download_in_progress = true;
-                            state.sb_download_result_rx = Some(rx);
-                            state.sb_current_download_id = Some(id);
-                            state.sb_status = Some(format!(
-                                "Downloading SB {}...",
-                                id
-                            ));
+                    ui.label("Name, designation or ID:");
+                    let response = ui.text_edit_singleline(&mut state.sb_download_id_input);
+                    let search_clicked = ui.button("Search").clicked()
+                        || response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+
+                    if search_clicked && !state.sb_search_in_progress {
+                        let search = state.sb_download_id_input.trim().to_string();
+                        if search.is_empty() {
+                            state.sb_search_results.clear();
+                            state.sb_status = None;
+                        } else {
+                            let (tx, rx) = mpsc::channel::<Result<Vec<sbdb::SbdbSearchResult>, String>>();
+                            state.sb_search_in_progress = true;
+                            state.sb_search_result_rx = Some(rx);
+                            state.sb_status = Some(format!("Searching SBDB for '{}'...", search));
 
                             std::thread::spawn(move || {
-                                let result = sbdb::download_and_store_small_body(id)
+                                let result = sbdb::search_sbdb_objects(&search)
                                     .map_err(|e| e.to_string());
                                 let _ = tx.send(result);
                             });
-                        } else {
-                            state.sb_status = Some("Invalid SB id".to_string());
                         }
                     }
                 });
+
+                if state.sb_download_id_input.trim().is_empty() {
+                    state.sb_search_results.clear();
+                }
+
+                if state.sb_search_in_progress {
+                    if let Some(rx) = &state.sb_search_result_rx {
+                        match rx.try_recv() {
+                            Ok(result) => {
+                                state.sb_search_in_progress = false;
+                                state.sb_search_result_rx = None;
+                                match result {
+                                    Ok(results) => {
+                                        state.sb_status = Some(format!("Found {} SBDB object(s)", results.len()));
+                                        state.sb_search_results = results;
+                                    }
+                                    Err(e) => state.sb_status = Some(format!("Search failed: {}", e)),
+                                }
+                            }
+                            Err(TryRecvError::Empty) => {}
+                            Err(TryRecvError::Disconnected) => {
+                                state.sb_search_in_progress = false;
+                                state.sb_search_result_rx = None;
+                                state.sb_status = Some("Search channel disconnected".to_string());
+                            }
+                        }
+                    }
+                }
+
+                if state.sb_search_in_progress {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Searching SBDB...");
+                    });
+                }
+
+                if !state.sb_download_id_input.trim().is_empty() {
+                    let downloaded = sbdb::list_downloaded_bodies().unwrap_or_default();
+                    let results = state.sb_search_results.clone();
+                    for result in results {
+                        let is_downloaded = downloaded.iter().any(|body| {
+                            body.spk_id == result.id || body.des == result.designation
+                        });
+
+                        if is_downloaded {
+                            continue;
+                        }
+
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(format!("{} ({})", result.name, result.id));
+                                if let Some(description) = &result.description {
+                                    ui.small(description);
+                                }
+                            });
+
+                            if ui.add_enabled(!state.sb_download_in_progress, egui::Button::new("Download")).clicked() {
+                                let search = result.designation.clone();
+                                let (tx, rx) = mpsc::channel::<Result<i32, String>>();
+                                state.sb_download_in_progress = true;
+                                state.sb_download_result_rx = Some(rx);
+                                state.sb_current_download_id = Some(search.clone());
+                                state.sb_status = Some(format!("Downloading {}...", result.name));
+
+                                std::thread::spawn(move || {
+                                    let result = sbdb::download_and_store_small_body(&search)
+                                        .map_err(|e| e.to_string());
+                                    let _ = tx.send(result);
+                                });
+                            }
+                        });
+                    }
+                }
 
                 if state.sb_download_in_progress {
                     if let Some(rx) = &state.sb_download_result_rx {
@@ -488,7 +559,7 @@ pub fn update_gui(state: &mut AppState) {
                                 state.sb_download_result_rx = None;
 
                                 match (result, state.sb_current_download_id.take()) {
-                                    (Ok(_), Some(id)) => {
+                                    (Ok(id), Some(_)) => {
                                         match state.simulation.add_small_body(id) {
                                             Ok(_) => {
                                                 rebuild_instances_and_gpu(state);
@@ -505,10 +576,10 @@ pub fn update_gui(state: &mut AppState) {
                                             }
                                         }
                                     }
-                                    (Err(e), Some(id)) => {
+                                    (Err(e), Some(search)) => {
                                         state.sb_status = Some(format!(
                                             "Download failed for {}: {}",
-                                            id,
+                                            search,
                                             e
                                         ));
                                     }
@@ -551,7 +622,7 @@ pub fn update_gui(state: &mut AppState) {
                 }
 
                 ui.separator();
-                ui.heading("Loaded SBs");
+                ui.heading("Downloaded SBs");
 
                 ui.horizontal(|ui| {
                     if ui.button("Select all").clicked() {
@@ -634,9 +705,25 @@ pub fn update_gui(state: &mut AppState) {
 
                 ui.separator();
 
+                let search = state.sb_download_id_input.trim().to_lowercase();
+                let downloaded = sbdb::list_downloaded_bodies().unwrap_or_default();
                 let sb_ids: Vec<i32> = state.simulation.sb_sorted_ids.to_vec();
                 for id in sb_ids {
                     if let Some(sb) = state.simulation.sb_celestial_objects.get(&id) {
+                        let info = downloaded.iter().find(|body| body.id == id);
+                        let matches_search = search.is_empty()
+                            || id.to_string().contains(&search)
+                            || sb.name.to_lowercase().contains(&search)
+                            || info.is_some_and(|body| {
+                                body.spk_id.to_lowercase().contains(&search)
+                                    || body.des.to_lowercase().contains(&search)
+                                    || body.fullname.to_lowercase().contains(&search)
+                            });
+
+                        if !matches_search {
+                            continue;
+                        }
+
                         ui.horizontal(|ui| {
                             let mut visible = state.simulation.sb_filter.contains(&id);
                             if ui.checkbox(&mut visible, "").changed() {
@@ -649,7 +736,15 @@ pub fn update_gui(state: &mut AppState) {
                                 }
                                 state.settings_dirty = true;
                             }
-                            ui.label(format!("{} ({})", id, sb.name));
+                            ui.vertical(|ui| {
+                                ui.label(format!("{} ({})", sb.name, id));
+                                if let Some(info) = info {
+                                    if !info.orbit_class_name.is_empty() {
+                                        ui.small(&info.orbit_class_name);
+                                    }
+                                }
+                            });
+                            ui.label(egui::RichText::new("Downloaded").color(egui::Color32::GREEN));
                             if ui.button("Focus").clicked() {
                                 state.simulation.focused_body_type = FocusedBodyType::SmallBody;
                                 state.simulation.focused_body_id = id;

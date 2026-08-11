@@ -7,7 +7,7 @@ use winit::{
     event::*, event_loop::ActiveEventLoop, keyboard::KeyCode, window::{Window}
 };
 
-use crate::modules::{projection_3d::{pipelines::common::create_render_pipeline_default, simulation, state::Vec3d, window_core::{camera::{self, Camera, CameraController, CameraUniform, Projection}, hdr::HdrPipeline, light::LightUniform, model::{self, DrawLight, Model, Vertex}, texture::{self, Texture}}}, utils};
+use crate::modules::{projection_3d::{pipelines::common::create_render_pipeline_default, simulation, state::Vec3d, window_core::{camera::{self, Camera, CameraController, CameraUniform, Projection}, hdr::HdrPipeline, light::LightUniform, model::{self, DrawLight, Model, Vertex}, texture::{self, Texture}}}, sbdb, utils};
 use crate::modules::spice_ker;
 use super::super::super::pipelines::{orbit, celestial_marker, closest_approach, body, trajectory};
 
@@ -104,12 +104,15 @@ pub struct AppState {
     // Small-body (SBDB) manager UI state
     pub(crate) show_sb_manager: bool,
     pub(crate) sb_download_id_input: String,
+    pub(crate) sb_search_results: Vec<sbdb::SbdbSearchResult>,
+    pub(crate) sb_search_in_progress: bool,
+    pub(crate) sb_search_result_rx: Option<mpsc::Receiver<Result<Vec<sbdb::SbdbSearchResult>, String>>>,
     pub(crate) sb_status: Option<String>,
     pub(crate) sb_selected_id: Option<i32>,
     pub(crate) sb_pending_delete: Option<Vec<i32>>,
     pub(crate) sb_download_in_progress: bool,
-    pub(crate) sb_download_result_rx: Option<mpsc::Receiver<Result<(), String>>>,
-    pub(crate) sb_current_download_id: Option<i32>,
+    pub(crate) sb_download_result_rx: Option<mpsc::Receiver<Result<i32, String>>>,
+    pub(crate) sb_current_download_id: Option<String>,
     pub(crate) sbdb_naif_distance_target_id: i32,
     pub(crate) sbdb_naif_search: String,
     pub(crate) show_sbdb_naif_search: bool,
@@ -652,6 +655,9 @@ impl AppState {
             show_settings: false,
             show_sb_manager: false,
             sb_download_id_input: String::new(),
+            sb_search_results: vec![],
+            sb_search_in_progress: false,
+            sb_search_result_rx: None,
             sb_status: None,
             sb_selected_id: None,
             sb_pending_delete: None,
