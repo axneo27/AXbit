@@ -1,8 +1,24 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
+use crate::modules::utils::YMD;
 
 pub const SBDB_API_URL: &str = "https://ssd-api.jpl.nasa.gov/sbdb.api";
+pub const SBDB_API_URL_CLOSE_APPROACH: &str = "https://ssd-api.jpl.nasa.gov/cad.api";
+
+// Default CAD response indexes for the query used below. When body=ALL, the
+// API inserts the encounter body after t_sigma_f and shifts later fields by 1.
+const CAD_DES: usize = 0;
+const CAD_ORBIT_ID: usize = 1;
+const CAD_JD: usize = 2;
+const CAD_CALENDAR_DATE: usize = 3;
+const CAD_DISTANCE: usize = 4;
+const CAD_DISTANCE_MIN: usize = 5;
+const CAD_DISTANCE_MAX: usize = 6;
+const CAD_RELATIVE_VELOCITY: usize = 7;
+const CAD_TIME_UNCERTAINTY: usize = 9;
+const CAD_BODY: usize = 10;
+const CAD_FULLNAME: usize = 11;
 
 pub fn init_db() -> Result<()> {
     let conn = open_db()?;
@@ -83,6 +99,7 @@ fn open_db() -> Result<Connection> {
     Ok(conn)
 }
 
+/// id can be either the SPK ID or the designation (des)
 pub fn fetch_sbdb_object(id: &str) -> Result<Value> {
     let url = SBDB_API_URL;
     let resp = reqwest::blocking::Client::new()
@@ -103,6 +120,114 @@ pub fn fetch_sbdb_object(id: &str) -> Result<Value> {
         .with_context(|| "failed to parse SBDB response as JSON")?;
 
     Ok(resp)
+}
+
+pub fn search_cad_objects(filters: &CloseApproachFilters) -> Result<Vec<CloseApproachData>> {
+    let url = SBDB_API_URL_CLOSE_APPROACH;
+    let client = reqwest::blocking::Client::new();
+    let start_date = filters.start_date.api_string();
+    let end_date = filters.end_date.api_string();
+    let maximum_distance_au = filters.maximum_distance_au.to_string();
+
+    let response = client.get(url)
+        .query(&[
+            ("body", filters.encounter_body.as_deref().unwrap_or("ALL")),
+            ("date-min", start_date.as_str()),
+            ("date-max", end_date.as_str()),
+            ("dist-max", maximum_distance_au.as_str()),
+            ("fullname", "true"),
+            ("limit", "200"),
+        ])
+        .send()
+        .with_context(|| format!("request to {} failed", url))?;
+    let status = response.status();
+    let data = response
+        .json::<Value>()
+        .with_context(|| "failed to parse SBDB CAD search response as JSON")?;
+
+    let requested_body = filters.encounter_body.as_deref().unwrap_or("Earth");
+    parse_cad_response(&data, requested_body).with_context(|| format!(
+        "SBDB CAD search failed ({}): {}",
+        status,
+        data["message"].as_str().unwrap_or("unexpected response")
+    ))
+}
+
+pub(crate) fn parse_cad_response(data: &Value, requested_body: &str) -> Result<Vec<CloseApproachData>> {
+    if data["count"].as_str() == Some("0") || data["count"].as_i64() == Some(0) {
+        return Ok(vec![]);
+    }
+
+    let fields = data["fields"].as_array().context("CAD response did not include fields")?;
+    let includes_body = fields.get(CAD_BODY).and_then(Value::as_str) == Some("body");
+    let fullname_index = CAD_FULLNAME + usize::from(includes_body);
+
+    let expected_fields = [
+        (CAD_DES, "des"),
+        (CAD_ORBIT_ID, "orbit_id"),
+        (CAD_JD, "jd"),
+        (CAD_CALENDAR_DATE, "cd"),
+        (CAD_DISTANCE, "dist"),
+        (CAD_DISTANCE_MIN, "dist_min"),
+        (CAD_DISTANCE_MAX, "dist_max"),
+        (CAD_RELATIVE_VELOCITY, "v_rel"),
+        (CAD_TIME_UNCERTAINTY, "t_sigma_f"),
+        (fullname_index, "fullname"),
+    ];
+
+    for (index, name) in expected_fields {
+        if fields.get(index).and_then(Value::as_str) != Some(name) {
+            anyhow::bail!("unexpected CAD response layout at index {}: expected '{}'", index, name);
+        }
+    }
+
+    if let Some(list) = data["data"].as_array() {
+        return list.iter().map(|object| {
+            let object = object.as_array().context("CAD record was not an array")?;
+
+            let designation = object.get(CAD_DES).and_then(Value::as_str)
+                .context("CAD record did not include a designation")?
+                .to_string();
+            let fullname = object.get(fullname_index).and_then(Value::as_str)
+                .unwrap_or(&designation)
+                .trim()
+                .to_string();
+
+            let encounter_body = if includes_body {
+                object.get(CAD_BODY).and_then(Value::as_str).unwrap_or(requested_body)
+            } else {
+                requested_body
+            }.to_string();
+
+            let tca_jd = object.get(CAD_JD).and_then(Value::as_str)
+                .and_then(|value| value.parse::<f64>().ok())
+                .context("CAD record did not include a valid JD")?;
+            let nominal_distance_au = object.get(CAD_DISTANCE).and_then(Value::as_str)
+                .and_then(|value| value.parse::<f64>().ok())
+                .context("CAD record did not include a valid distance")?;
+            let relative_velocity_km_s = object.get(CAD_RELATIVE_VELOCITY).and_then(Value::as_str)
+                .and_then(|value| value.parse::<f64>().ok())
+                .context("CAD record did not include a valid relative velocity")?;
+
+            Ok(CloseApproachData {
+                designation,
+                sb_name: fullname,
+                encounter_body,
+                jpl_orbit_id: object.get(CAD_ORBIT_ID).and_then(Value::as_str).unwrap_or("").to_string(),
+                tca_jd,
+                tca_calendar: object.get(CAD_CALENDAR_DATE).and_then(Value::as_str).unwrap_or("").to_string(),
+                nominal_distance_au,
+                minimum_3sigma_distance_au: object.get(CAD_DISTANCE_MIN).and_then(Value::as_str)
+                    .and_then(|value| value.parse::<f64>().ok()),
+                maximum_3sigma_distance_au: object.get(CAD_DISTANCE_MAX).and_then(Value::as_str)
+                    .and_then(|value| value.parse::<f64>().ok()),
+                relative_velocity_km_s,
+                time_uncertainty: object.get(CAD_TIME_UNCERTAINTY).and_then(Value::as_str).map(str::to_string),
+            })
+        }).collect();
+    }
+
+    anyhow::bail!(data["message"].as_str().unwrap_or("unexpected response").to_string())
 }
 
 pub fn search_sbdb_objects(search: &str) -> Result<Vec<SbdbSearchResult>> {
@@ -566,4 +691,58 @@ pub struct SbdbSearchResult {
     pub designation: String,
     pub name: String,
     pub description: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CloseApproachData {
+    pub designation: String,
+    pub sb_name: String,
+    pub encounter_body: String,
+    pub jpl_orbit_id: String,
+    pub tca_jd: f64,
+    pub tca_calendar: String,
+    pub nominal_distance_au: f64,
+    pub minimum_3sigma_distance_au: Option<f64>,
+    pub maximum_3sigma_distance_au: Option<f64>,
+    pub relative_velocity_km_s: f64,
+    /// e.g. could be "13:02" or "2_09:08" (2 days, 9 hours, 8 minutes)
+    pub time_uncertainty: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CloseApproachFilters {
+    /// either one or * or all
+    pub encounter_body: Option<String>,
+    pub start_date: YMD,
+    pub end_date: YMD,
+    pub maximum_distance_au: f64,
+    pub downloaded_only: bool,
+}
+
+impl CloseApproachFilters {
+    pub fn new() -> Self {
+        Self {
+            encounter_body: None,
+            start_date: YMD::new(2026, 1, 1),
+            end_date: YMD::new(2031, 1, 1),
+            maximum_distance_au: 0.05,
+            downloaded_only: false,
+        }
+    }
+}
+
+pub fn planet_name_to_cad_name(planet_name: &str) -> Option<&'static str> {
+    match planet_name.to_lowercase().as_str() {
+        "mercury" => Some("Merc"),
+        "venus" => Some("Venus"),
+        "earth" => Some("Earth"),
+        "mars" => Some("Mars"),
+        "jupiter" => Some("Juptr"),
+        "saturn" => Some("Satrn"),
+        "uranus" => Some("Urnus"),
+        "neptune" => Some("Neptn"),
+        "pluto" => Some("Pluto"),
+        "moon" => Some("Moon"),
+        _ => None,
+    }
 }

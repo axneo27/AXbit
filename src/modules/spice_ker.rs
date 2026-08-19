@@ -72,6 +72,22 @@ pub fn naif_id_is_planet(id: i32) -> bool {
     STANDARD_PLANET_IDS.contains(&id)
 }
 
+/// quick static mapping to not have to run a cspice query each time.
+pub fn planet_id_to_name(id: &i32) -> Option<&'static str> {
+    match id {
+        199 => Some("Mercury"),
+        299 => Some("Venus"),
+        399 => Some("Earth"),
+        499 => Some("Mars"),
+        599 => Some("Jupiter"),
+        699 => Some("Saturn"),
+        799 => Some("Uranus"),
+        899 => Some("Neptune"),
+        999 => Some("Pluto"),
+        _ => None,
+    }
+}
+
 pub fn naif_id_is_satellite(id: i32) -> bool {
     !naif_id_is_barycenter(id) && id != 10 && !naif_id_is_planet(id)
 }

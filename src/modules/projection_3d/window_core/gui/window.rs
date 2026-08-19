@@ -1,13 +1,13 @@
 use std::{iter, sync::{Arc, mpsc}};
 use anyhow::Result;
 use wgpu::util::DeviceExt;
-use chrono::{NaiveDateTime, Datelike, Timelike, Duration};
+use chrono::{NaiveDateTime, Duration};
 
 use winit::{
     event::*, event_loop::ActiveEventLoop, keyboard::KeyCode, window::{Window}
 };
 
-use crate::modules::{projection_3d::{pipelines::common::create_render_pipeline_default, simulation, state::Vec3d, window_core::{camera::{self, Camera, CameraController, CameraUniform, Projection}, hdr::HdrPipeline, light::LightUniform, model::{self, DrawLight, Model, Vertex}, texture::{self, Texture}}}, sbdb, utils};
+use crate::modules::{projection_3d::{pipelines::common::create_render_pipeline_default, simulation, state::Vec3d, window_core::{camera::{self, Camera, CameraController, CameraUniform, Projection}, hdr::HdrPipeline, light::LightUniform, model::{self, DrawLight, Model, Vertex}, texture::{self, Texture}}}, sbdb, utils::{self, YMDHMS, DistanceUnit}};
 use crate::modules::spice_ker;
 use super::super::super::pipelines::{orbit, celestial_marker, closest_approach, body, trajectory};
 
@@ -22,6 +22,12 @@ use egui_wgpu::ScreenDescriptor;
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Uniforms {
     viewport_size: [f32; 2],
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum SbManagerTab {
+    Search,
+    CloseApproaches,
 }
 
 impl Uniforms {
@@ -103,6 +109,9 @@ pub struct AppState {
     pub(crate) show_settings: bool,
     // Small-body (SBDB) manager UI state
     pub(crate) show_sb_manager: bool,
+    pub(crate) sb_manager_tab: SbManagerTab,
+
+    /// More for sbdb search
     pub(crate) sb_download_id_input: String,
     pub(crate) sb_search_results: Vec<sbdb::SbdbSearchResult>,
     pub(crate) sb_search_in_progress: bool,
@@ -117,21 +126,19 @@ pub struct AppState {
     pub(crate) sbdb_naif_search: String,
     pub(crate) show_sbdb_naif_search: bool,
 
+    /// More for close approach
+    pub(crate) sb_cad_filters: sbdb::CloseApproachFilters,
+    pub(crate) sb_cad_results: Vec<sbdb::CloseApproachData>,
+    pub(crate) sb_cad_results_rx: Option<mpsc::Receiver<Result<Vec<sbdb::CloseApproachData>, String>>>,
+    pub(crate) sb_cad_search_status: Option<String>,
+    pub(crate) sb_cad_loaded_planets_ids: Vec<i32>,
+    pub(crate) sb_cad_unit: DistanceUnit,
+
     // Integrator UI state
     pub(crate) show_integrator_window: bool,
     pub(crate) integrator_sb_id: Option<i32>,
-    pub(crate) integrator_start_year: i32,
-    pub(crate) integrator_start_month: u32,
-    pub(crate) integrator_start_day: u32,
-    pub(crate) integrator_start_hour: u32,
-    pub(crate) integrator_start_minute: u32,
-    pub(crate) integrator_start_second: u32,
-    pub(crate) integrator_end_year: i32,
-    pub(crate) integrator_end_month: u32,
-    pub(crate) integrator_end_day: u32,
-    pub(crate) integrator_end_hour: u32,
-    pub(crate) integrator_end_minute: u32,
-    pub(crate) integrator_end_second: u32,
+    pub(crate) integrator_start: YMDHMS,
+    pub(crate) integrator_end: YMDHMS,
     pub(crate) integrator_dt_hours: f64,
     pub(crate) integrator_in_progress: bool,
     pub(crate) integrator_result_rx: Option<mpsc::Receiver<crate::modules::projection_3d::traj::Integrator>>,
@@ -570,21 +577,8 @@ impl AppState {
                 chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap(),
                 chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
             ));
-        let start_year = parsed_dt.year();
-        let start_month = parsed_dt.month();
-        let start_day = parsed_dt.day();
-        let start_hour = parsed_dt.hour();
-        let start_minute = parsed_dt.minute();
-        let start_second = parsed_dt.second();
-
         // Default end time: ~5 months after start (approx. 150 days).
         let end_dt = parsed_dt + Duration::days(150);
-        let end_year = end_dt.year();
-        let end_month = end_dt.month();
-        let end_day = end_dt.day();
-        let end_hour = end_dt.hour();
-        let end_minute = end_dt.minute();
-        let end_second = end_dt.second();
 
         let state = Self {
             surface,
@@ -653,7 +647,10 @@ impl AppState {
             return_to_kernel_setup: false,
             kernel_manifest: kernel_selection.manifest_path.clone(),
             show_settings: false,
+
             show_sb_manager: false,
+            sb_manager_tab: SbManagerTab::Search,
+
             sb_download_id_input: String::new(),
             sb_search_results: vec![],
             sb_search_in_progress: false,
@@ -668,19 +665,16 @@ impl AppState {
             sbdb_naif_search: String::new(),
             show_sbdb_naif_search: false,
 
+            sb_cad_filters: sbdb::CloseApproachFilters::new(),
+            sb_cad_results: vec![],
+            sb_cad_results_rx: None,
+            sb_cad_search_status: None,
+            sb_cad_loaded_planets_ids: vec![],
+            sb_cad_unit: DistanceUnit::AU,
+
             show_integrator_window: false,
-            integrator_start_year: start_year,
-            integrator_start_month: start_month,
-            integrator_start_day: start_day,
-            integrator_start_hour: start_hour,
-            integrator_start_minute: start_minute,
-            integrator_start_second: start_second,
-            integrator_end_year: end_year,
-            integrator_end_month: end_month,
-            integrator_end_day: end_day,
-            integrator_end_hour: end_hour,
-            integrator_end_minute: end_minute,
-            integrator_end_second: end_second,
+            integrator_start: YMDHMS::from_datetime(parsed_dt),
+            integrator_end: YMDHMS::from_datetime(end_dt),
             integrator_sb_id: None,
             integrator_dt_hours: 2.0,
             integrator_in_progress: false,

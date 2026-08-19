@@ -2,6 +2,66 @@
 pub static SPICE_TEST_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
 #[cfg(test)]
+mod sbdb_api_tests {
+    use crate::modules::sbdb;
+
+    #[test]
+    fn parses_close_approach_response() {
+        let data = serde_json::json!({
+            "count": 1,
+            "fields": ["des", "orbit_id", "jd", "cd", "dist", "dist_min", "dist_max", "v_rel", "v_inf", "t_sigma_f", "h", "fullname"],
+            "data": [["99942", "220", "2462240.407", "2029-Apr-13 21:46", "0.000254", "0.000253", "0.000255", "7.4225", "5.84", "< 00:01", "19.09", "99942 Apophis"]]
+        });
+
+        let results = sbdb::parse_cad_response(&data, "Earth").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].designation, "99942");
+        assert_eq!(results[0].sb_name, "99942 Apophis");
+        assert_eq!(results[0].jpl_orbit_id, "220");
+        assert_eq!(results[0].nominal_distance_au, 0.000254);
+        assert_eq!(results[0].time_uncertainty.as_deref(), Some("< 00:01"));
+    }
+
+    #[test]
+    fn shifts_fullname_when_all_bodies_are_requested() {
+        let data = serde_json::json!({
+            "count": 1,
+            "fields": ["des", "orbit_id", "jd", "cd", "dist", "dist_min", "dist_max", "v_rel", "v_inf", "t_sigma_f", "body", "h", "fullname"],
+            "data": [["99942", "220", "2462240.407", "2029-Apr-13 21:46", "0.000254", "0.000253", "0.000255", "7.4225", "5.84", "< 00:01", "Earth", "19.09", "99942 Apophis"]]
+        });
+
+        let results = sbdb::parse_cad_response(&data, "ALL").unwrap();
+        assert_eq!(results[0].encounter_body, "Earth");
+        assert_eq!(results[0].sb_name, "99942 Apophis");
+    }
+
+    #[test]
+    fn accepts_empty_close_approach_response() {
+        let data = serde_json::json!({"count": 0});
+        assert!(sbdb::parse_cad_response(&data, "Earth").unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod unit_conversion_tests {
+    use crate::modules::{projection_3d::simulation::AU_KM, utils};
+
+    #[test]
+    fn converts_au_and_km() {
+        assert_eq!(utils::au_to_km(1.0), AU_KM);
+        assert_eq!(utils::km_to_au(AU_KM), 1.0);
+    }
+
+    #[test]
+    fn au_km_conversion_round_trip() {
+        let distance_au = 0.000254090910419299;
+        let converted = utils::km_to_au(utils::au_to_km(distance_au));
+
+        assert!((converted - distance_au).abs() < 1.0e-15);
+    }
+}
+
+#[cfg(test)]
 fn required_test_kernels_available() -> bool {
     let config_text = std::fs::read_to_string("kernels.toml")
         .expect("could not read kernels.toml");

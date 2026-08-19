@@ -1,9 +1,84 @@
 use std::{error::Error, ffi::{CStr, CString}, collections::HashMap, fmt, sync::{Mutex, LazyLock}, time::{SystemTime, UNIX_EPOCH}};
-use chrono::DateTime;
+use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Timelike};
 use libc::c_char;
 use log::{error, warn};
-use crate::modules::{spice_bindings, projection_3d::{state::{StateVector, Vec3d}}};
+use crate::modules::{projection_3d::{simulation, state::{StateVector, Vec3d}}, spice_bindings};
 use std::write;
+use std::format;
+
+#[derive(Debug, Clone, Copy)]
+pub struct YMD {
+    pub year: i32,
+    pub month: u32,
+    pub day: u32,
+}
+
+impl YMD {
+    pub fn new(year: i32, month: u32, day: u32) -> Self {
+        Self { year, month, day }
+    }
+
+    pub fn date(&self) -> Option<NaiveDate> {
+        NaiveDate::from_ymd_opt(self.year, self.month, self.day)
+    }
+
+    pub fn api_string(&self) -> String {
+        format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct YMDHMS {
+    pub year: i32,
+    pub month: u32,
+    pub day: u32,
+    pub hour: u32,
+    pub minute: u32,
+    pub second: u32,
+}
+
+impl YMDHMS {
+    pub fn from_datetime(datetime: NaiveDateTime) -> Self {
+        Self {
+            year: datetime.year(),
+            month: datetime.month(),
+            day: datetime.day(),
+            hour: datetime.hour(),
+            minute: datetime.minute(),
+            second: datetime.second(),
+        }
+    }
+
+    pub fn utc_string(&self) -> String {
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            self.year, self.month, self.day, self.hour, self.minute, self.second,
+        )
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DistanceUnit {
+    AU,
+    KM,
+}
+
+impl DistanceUnit {
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            DistanceUnit::AU => "au",
+            DistanceUnit::KM => "km",
+        }
+    }
+}
+
+pub fn au_to_km(au: f64) -> f64 {
+    au * simulation::AU_KM
+}
+
+pub fn km_to_au(km: f64) -> f64 {
+    km / simulation::AU_KM
+}
 
 #[derive(Debug)]
 pub struct SpiceError(pub String);
