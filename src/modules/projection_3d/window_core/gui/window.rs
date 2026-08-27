@@ -26,7 +26,11 @@ pub struct Uniforms {
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum SbManagerTab {
+    /// Mainly for searching, filtering, downloading ALL small bodies.
     Search,
+    /// Shows data from SBDB CAD (Close Approach Data) API with filtering options.
+    /// From here it is possible to directly run the integrator on a selected body's close approach.
+    /// By default, sets start time of the integrator to 75 days before the close approach.
     CloseApproaches,
 }
 

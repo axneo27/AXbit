@@ -1,7 +1,7 @@
+use crate::modules::utils::YMD;
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
-use crate::modules::utils::YMD;
 
 pub const SBDB_API_URL: &str = "https://ssd-api.jpl.nasa.gov/sbdb.api";
 pub const SBDB_API_URL_CLOSE_APPROACH: &str = "https://ssd-api.jpl.nasa.gov/cad.api";
@@ -110,6 +110,7 @@ pub fn fetch_sbdb_object(id: &str) -> Result<Value> {
             ("full-prec", "true"),
             ("cd-epoch", "true"),
             ("phys-par", "true"),
+          //  ("ca-data", "true"),
             ("cov", "src"),
         ])
         .send()
@@ -129,7 +130,8 @@ pub fn search_cad_objects(filters: &CloseApproachFilters) -> Result<Vec<CloseApp
     let end_date = filters.end_date.api_string();
     let maximum_distance_au = filters.maximum_distance_au.to_string();
 
-    let response = client.get(url)
+    let response = client
+        .get(url)
         .query(&[
             ("body", filters.encounter_body.as_deref().unwrap_or("ALL")),
             ("date-min", start_date.as_str()),
@@ -146,19 +148,26 @@ pub fn search_cad_objects(filters: &CloseApproachFilters) -> Result<Vec<CloseApp
         .with_context(|| "failed to parse SBDB CAD search response as JSON")?;
 
     let requested_body = filters.encounter_body.as_deref().unwrap_or("Earth");
-    parse_cad_response(&data, requested_body).with_context(|| format!(
-        "SBDB CAD search failed ({}): {}",
-        status,
-        data["message"].as_str().unwrap_or("unexpected response")
-    ))
+    parse_cad_response(&data, requested_body).with_context(|| {
+        format!(
+            "SBDB CAD search failed ({}): {}",
+            status,
+            data["message"].as_str().unwrap_or("unexpected response")
+        )
+    })
 }
 
-pub(crate) fn parse_cad_response(data: &Value, requested_body: &str) -> Result<Vec<CloseApproachData>> {
+pub(crate) fn parse_cad_response(
+    data: &Value,
+    requested_body: &str,
+) -> Result<Vec<CloseApproachData>> {
     if data["count"].as_str() == Some("0") || data["count"].as_i64() == Some(0) {
         return Ok(vec![]);
     }
 
-    let fields = data["fields"].as_array().context("CAD response did not include fields")?;
+    let fields = data["fields"]
+        .as_array()
+        .context("CAD response did not include fields")?;
     let includes_body = fields.get(CAD_BODY).and_then(Value::as_str) == Some("body");
     let fullname_index = CAD_FULLNAME + usize::from(includes_body);
 
@@ -177,57 +186,96 @@ pub(crate) fn parse_cad_response(data: &Value, requested_body: &str) -> Result<V
 
     for (index, name) in expected_fields {
         if fields.get(index).and_then(Value::as_str) != Some(name) {
-            anyhow::bail!("unexpected CAD response layout at index {}: expected '{}'", index, name);
+            anyhow::bail!(
+                "unexpected CAD response layout at index {}: expected '{}'",
+                index,
+                name
+            );
         }
     }
 
     if let Some(list) = data["data"].as_array() {
-        return list.iter().map(|object| {
-            let object = object.as_array().context("CAD record was not an array")?;
+        return list
+            .iter()
+            .map(|object| {
+                let object = object.as_array().context("CAD record was not an array")?;
 
-            let designation = object.get(CAD_DES).and_then(Value::as_str)
-                .context("CAD record did not include a designation")?
+                let designation = object
+                    .get(CAD_DES)
+                    .and_then(Value::as_str)
+                    .context("CAD record did not include a designation")?
+                    .to_string();
+                let fullname = object
+                    .get(fullname_index)
+                    .and_then(Value::as_str)
+                    .unwrap_or(&designation)
+                    .trim()
+                    .to_string();
+
+                let encounter_body = if includes_body {
+                    object
+                        .get(CAD_BODY)
+                        .and_then(Value::as_str)
+                        .unwrap_or(requested_body)
+                } else {
+                    requested_body
+                }
                 .to_string();
-            let fullname = object.get(fullname_index).and_then(Value::as_str)
-                .unwrap_or(&designation)
-                .trim()
-                .to_string();
 
-            let encounter_body = if includes_body {
-                object.get(CAD_BODY).and_then(Value::as_str).unwrap_or(requested_body)
-            } else {
-                requested_body
-            }.to_string();
+                let tca_jd = object
+                    .get(CAD_JD)
+                    .and_then(Value::as_str)
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .context("CAD record did not include a valid JD")?;
+                let nominal_distance_au = object
+                    .get(CAD_DISTANCE)
+                    .and_then(Value::as_str)
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .context("CAD record did not include a valid distance")?;
+                let relative_velocity_km_s = object
+                    .get(CAD_RELATIVE_VELOCITY)
+                    .and_then(Value::as_str)
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .context("CAD record did not include a valid relative velocity")?;
 
-            let tca_jd = object.get(CAD_JD).and_then(Value::as_str)
-                .and_then(|value| value.parse::<f64>().ok())
-                .context("CAD record did not include a valid JD")?;
-            let nominal_distance_au = object.get(CAD_DISTANCE).and_then(Value::as_str)
-                .and_then(|value| value.parse::<f64>().ok())
-                .context("CAD record did not include a valid distance")?;
-            let relative_velocity_km_s = object.get(CAD_RELATIVE_VELOCITY).and_then(Value::as_str)
-                .and_then(|value| value.parse::<f64>().ok())
-                .context("CAD record did not include a valid relative velocity")?;
-
-            Ok(CloseApproachData {
-                designation,
-                sb_name: fullname,
-                encounter_body,
-                jpl_orbit_id: object.get(CAD_ORBIT_ID).and_then(Value::as_str).unwrap_or("").to_string(),
-                tca_jd,
-                tca_calendar: object.get(CAD_CALENDAR_DATE).and_then(Value::as_str).unwrap_or("").to_string(),
-                nominal_distance_au,
-                minimum_3sigma_distance_au: object.get(CAD_DISTANCE_MIN).and_then(Value::as_str)
-                    .and_then(|value| value.parse::<f64>().ok()),
-                maximum_3sigma_distance_au: object.get(CAD_DISTANCE_MAX).and_then(Value::as_str)
-                    .and_then(|value| value.parse::<f64>().ok()),
-                relative_velocity_km_s,
-                time_uncertainty: object.get(CAD_TIME_UNCERTAINTY).and_then(Value::as_str).map(str::to_string),
+                Ok(CloseApproachData {
+                    designation,
+                    sb_name: fullname,
+                    encounter_body,
+                    jpl_orbit_id: object
+                        .get(CAD_ORBIT_ID)
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    tca_jd,
+                    tca_calendar: object
+                        .get(CAD_CALENDAR_DATE)
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    nominal_distance_au,
+                    minimum_3sigma_distance_au: object
+                        .get(CAD_DISTANCE_MIN)
+                        .and_then(Value::as_str)
+                        .and_then(|value| value.parse::<f64>().ok()),
+                    maximum_3sigma_distance_au: object
+                        .get(CAD_DISTANCE_MAX)
+                        .and_then(Value::as_str)
+                        .and_then(|value| value.parse::<f64>().ok()),
+                    relative_velocity_km_s,
+                    time_uncertainty: object
+                        .get(CAD_TIME_UNCERTAINTY)
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                })
             })
-        }).collect();
+            .collect();
     }
 
-    anyhow::bail!(data["message"].as_str().unwrap_or("unexpected response").to_string())
+    anyhow::bail!(data["message"]
+        .as_str()
+        .unwrap_or("unexpected response")
+        .to_string())
 }
 
 pub fn search_sbdb_objects(search: &str) -> Result<Vec<SbdbSearchResult>> {
@@ -252,28 +300,43 @@ pub fn search_sbdb_objects(search: &str) -> Result<Vec<SbdbSearchResult>> {
     };
 
     let (mut status, mut data) = request(search)?;
-    if data["code"].as_str() == Some("200") && data["message"].as_str().is_some_and(|message| message.contains("not found")) {
+    if data["code"].as_str() == Some("200")
+        && data["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("not found"))
+    {
         (status, data) = request(&format!("{}*", search))?;
     }
 
     if let Some(list) = data["list"].as_array() {
-        return Ok(list.iter().filter_map(|object| {
-            let designation = object["pdes"].as_str()?.to_string();
-            let name = object["name"].as_str().unwrap_or(&designation).trim().to_string();
+        return Ok(list
+            .iter()
+            .filter_map(|object| {
+                let designation = object["pdes"].as_str()?.to_string();
+                let name = object["name"]
+                    .as_str()
+                    .unwrap_or(&designation)
+                    .trim()
+                    .to_string();
 
-            Some(SbdbSearchResult {
-                id: designation.clone(),
-                designation,
-                name,
-                description: None,
+                Some(SbdbSearchResult {
+                    id: designation.clone(),
+                    designation,
+                    name,
+                    description: None,
+                })
             })
-        }).collect());
+            .collect());
     }
 
     if let Some(object) = data.get("object") {
         let designation = object["des"].as_str().unwrap_or(search).to_string();
         let spk_id = object["spkid"].as_str().unwrap_or(&designation).to_string();
-        let name = object["fullname"].as_str().unwrap_or(&designation).trim().to_string();
+        let name = object["fullname"]
+            .as_str()
+            .unwrap_or(&designation)
+            .trim()
+            .to_string();
         let description = object["orbit_class"]["name"].as_str().map(str::to_string);
 
         return Ok(vec![SbdbSearchResult {
@@ -284,7 +347,11 @@ pub fn search_sbdb_objects(search: &str) -> Result<Vec<SbdbSearchResult>> {
         }]);
     }
 
-    if data["code"].as_str() == Some("200") && data["message"].as_str().is_some_and(|message| message.contains("not found")) {
+    if data["code"].as_str() == Some("200")
+        && data["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("not found"))
+    {
         return Ok(vec![]);
     }
 
@@ -319,10 +386,7 @@ pub fn store_body_from_json(id: i32, data: &Value) -> Result<()> {
     let obj = &data["object"];
     let orbit = &data["orbit"];
 
-    let spk_id = obj["spkid"]
-        .as_str()
-        .unwrap_or(&id.to_string())
-        .to_string();
+    let spk_id = obj["spkid"].as_str().unwrap_or(&id.to_string()).to_string();
 
     let des = obj["des"].as_str().unwrap_or("").to_string();
     let fullname = obj["fullname"].as_str().unwrap_or("").to_string();
@@ -346,9 +410,7 @@ pub fn store_body_from_json(id: i32, data: &Value) -> Result<()> {
             .find(|el| el.get("name").and_then(|v| v.as_str()) == Some(name))
     };
 
-    let epoch_jd: Option<f64> = orbit["epoch"]
-        .as_str()
-        .and_then(|s| s.parse::<f64>().ok());
+    let epoch_jd: Option<f64> = orbit["epoch"].as_str().and_then(|s| s.parse::<f64>().ok());
 
     let eccentricity: Option<f64> = find_elem("e")
         .and_then(|el| el.get("value"))
@@ -380,25 +442,24 @@ pub fn store_body_from_json(id: i32, data: &Value) -> Result<()> {
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok());
 
-    // Extract physical parameters from phys_par array
+    // SBDB documents `diameter` as an effective body diameter in km. Keep that
+    // API value in the database; consumers that need a radius convert it at
+    // the boundary.
     let mut diameter_km: Option<f64> = None;
     let mut gm_km3_s2: Option<f64> = None;
     let mut h_magnitude: Option<f64> = None;
     let mut albedo: Option<f64> = None;
 
-    if let Some(arr) = obj.get("phys_par").and_then(|v| v.as_array()) {
+    if let Some(arr) = data.get("phys_par").and_then(|v| v.as_array()) {
         for entry in arr {
-            let pname = entry
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let pname = entry.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let val_str = entry.get("value").and_then(|v| v.as_str());
 
             match pname {
                 "diameter" => {
                     if let Some(vs) = val_str {
                         if let Ok(d_km) = vs.parse::<f64>() {
-                            diameter_km = Some(d_km / 2.0); // diameter -> radius
+                            diameter_km = Some(d_km);
                         }
                     }
                 }
@@ -433,12 +494,11 @@ pub fn store_body_from_json(id: i32, data: &Value) -> Result<()> {
         let h = h_magnitude.unwrap();
         let pv = albedo.unwrap_or(0.15);
         let d_m = diameter_from_h_albedo_m(h, pv);
-        diameter_km = Some(d_m / 2000.0); // meters -> km, diameter -> radius
+        diameter_km = Some(d_m / 1000.0); // meters -> km
     }
 
     // Store full JSON for completeness
-    let raw_json =
-        serde_json::to_string(data).context("failed to serialize JSON to string")?;
+    let raw_json = serde_json::to_string(data).context("failed to serialize JSON to string")?;
 
     conn.execute(
         "
@@ -579,10 +639,7 @@ pub fn delete_downloaded_small_bodies(ids: &[i32]) -> Result<usize> {
 
     for id in ids {
         let rows_deleted = conn
-            .execute(
-                "DELETE FROM celestial_bodies WHERE id = ?1",
-                params![id],
-            )
+            .execute("DELETE FROM celestial_bodies WHERE id = ?1", params![id])
             .context("failed to delete body from database")?;
 
         if rows_deleted > 0 {
@@ -648,9 +705,7 @@ pub fn redownload_all_bodies() -> Result<usize> {
 
     for id in ids {
         let id_str = id.to_string();
-        match fetch_sbdb_object(&id_str)
-            .and_then(|obj| store_body_from_json(id, &obj))
-        {
+        match fetch_sbdb_object(&id_str).and_then(|obj| store_body_from_json(id, &obj)) {
             Ok(()) => refreshed += 1,
             Err(e) => log::warn!("Failed to re-download body {}: {}", id, e),
         }
