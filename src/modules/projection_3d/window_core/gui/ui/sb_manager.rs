@@ -168,23 +168,29 @@ pub(super) fn show(state: &mut AppState, ctx: &egui::Context) {
                     };
 
                     ui.horizontal(|ui| {
-                        ui.label("From:");
-                        let mut start_date = state.sb_cad_filters.start_date.date()
-                            .unwrap_or_else(|| NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
-                        if ui.add(DatePickerButton::new(&mut start_date)).changed() {
-                            state.sb_cad_filters.start_date.year = start_date.year();
-                            state.sb_cad_filters.start_date.month = start_date.month();
-                            state.sb_cad_filters.start_date.day = start_date.day();
-                        }
+                        
+                        ui.push_id("close_approach_data_from_date", |ui| {
+                            ui.label("From:");
+                            let mut start_date = state.sb_cad_filters.start_date.date()
+                                .unwrap_or_else(|| NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+                            if ui.add(DatePickerButton::new(&mut start_date)).changed() {
+                                state.sb_cad_filters.start_date.year = start_date.year();
+                                state.sb_cad_filters.start_date.month = start_date.month();
+                                state.sb_cad_filters.start_date.day = start_date.day();
+                            }
+                        });
 
-                        ui.label("To:");
-                        let mut end_date = state.sb_cad_filters.end_date.date()
-                            .unwrap_or_else(|| NaiveDate::from_ymd_opt(2031, 1, 1).unwrap());
-                        if ui.add(DatePickerButton::new(&mut end_date)).changed() {
-                            state.sb_cad_filters.end_date.year = end_date.year();
-                            state.sb_cad_filters.end_date.month = end_date.month();
-                            state.sb_cad_filters.end_date.day = end_date.day();
-                        }
+                        ui.push_id("close_approach_data_to_date", |ui| {
+                            ui.label("To:");
+                            let mut end_date = state.sb_cad_filters.end_date.date()
+                                .unwrap_or_else(|| NaiveDate::from_ymd_opt(2031, 1, 1).unwrap());
+                            if ui.add(DatePickerButton::new(&mut end_date)).changed() {
+                                state.sb_cad_filters.end_date.year = end_date.year();
+                                state.sb_cad_filters.end_date.month = end_date.month();
+                                state.sb_cad_filters.end_date.day = end_date.day();
+                            }
+                        });
+                        
                     });
 
                     ui.horizontal(|ui| {
@@ -238,7 +244,11 @@ pub(super) fn show(state: &mut AppState, ctx: &egui::Context) {
                             state.sb_cad_results_rx = Some(rx);
                             state.sb_cad_search_status = Some("Searching close approaches...".to_string());
                             std::thread::spawn(move || {
-                                let result = sbdb::search_cad_objects(&filters).map_err(|e| e.to_string());
+                                let result = if filters.downloaded_only {
+                                    sbdb::list_downloaded_close_approaches(&filters).map_err(|e| e.to_string())
+                                } else {
+                                    sbdb::search_cad_objects(&filters).map_err(|e| e.to_string())
+                                };
                                 let _ = tx.send(result);
                             });
                         }
@@ -285,14 +295,21 @@ pub(super) fn show(state: &mut AppState, ctx: &egui::Context) {
                     let downloaded = sbdb::list_downloaded_bodies().unwrap_or_default();
                     let results = state.sb_cad_results.clone();
                     for result in results {
-                        let downloaded_body = downloaded.iter().find(|body| body.des == result.designation);
-                        if state.sb_cad_filters.downloaded_only && downloaded_body.is_none() {
-                            continue;
-                        }
+                        let downloaded_body = downloaded.iter().find(|body| body.des == result.designation.clone().unwrap_or_default());
 
                         ui.separator();
                         ui.horizontal(|ui| {
+
+                            let sb_name = if state.sb_cad_filters.downloaded_only {
+                                downloaded_body.map(|body| body.fullname.clone())
+                                    .unwrap_or(result.designation.clone().unwrap_or_default())
+                            } else {
+                                result.sb_name.clone()
+                                    .unwrap_or(result.designation.clone().unwrap_or_default())
+                            };
+
                             ui.vertical(|ui| {
+
                                 let nominal_distance = match state.sb_cad_unit {
                                     DistanceUnit::AU => result.nominal_distance_au,
                                     DistanceUnit::KM => utils::au_to_km(result.nominal_distance_au),
@@ -302,7 +319,7 @@ pub(super) fn show(state: &mut AppState, ctx: &egui::Context) {
                                     DistanceUnit::KM => 0,
                                 };
 
-                                ui.strong(&result.sb_name);
+                                ui.strong(&sb_name);
                                 ui.label(format!("{} · {}", result.encounter_body, result.tca_calendar));
                                 ui.small(format!(
                                     "Distance: {} {} · Relative velocity: {:.3} km/s",
@@ -341,6 +358,14 @@ pub(super) fn show(state: &mut AppState, ctx: &egui::Context) {
                                 ));
 
                                 if prepare.clicked() {
+                                    
+                                    let visible = state.simulation.sb_filter.contains(&body.id);
+                                    if !visible {
+                                        state.simulation.sb_filter.insert(body.id);
+                                        state.simulation.sb_orbit_filter.insert(body.id);
+                                    }
+                                    state.settings_dirty = true;
+
                                     match prepare_close_approach_integration(state, body.id, &result) {
                                         Ok(()) => {
                                             state.sb_cad_search_status = Some(format!(
@@ -356,14 +381,14 @@ pub(super) fn show(state: &mut AppState, ctx: &egui::Context) {
                                         }
                                     }
                                 }
-                            } else if ui
-                                .add_enabled(
+                            } else 
+                                if ui.add_enabled(
                                     !state.sb_download_in_progress,
                                     egui::Button::new("Download"),
                                 )
                                 .clicked()
                             {
-                                start_sb_download(state, &result.designation, &result.sb_name);
+                                start_sb_download(state, &result.designation.unwrap_or_default(), &sb_name);
                             }
                         });
                     }

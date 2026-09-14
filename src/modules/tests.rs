@@ -3,7 +3,8 @@ pub static SPICE_TEST_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> = std::syn
 
 #[cfg(test)]
 mod sbdb_api_tests {
-    use crate::modules::sbdb;
+
+    use crate::modules::{sbdb, utils};
 
     #[test]
     fn parses_close_approach_response() {
@@ -13,10 +14,10 @@ mod sbdb_api_tests {
             "data": [["99942", "220", "2462240.407", "2029-Apr-13 21:46", "0.000254", "0.000253", "0.000255", "7.4225", "5.84", "< 00:01", "19.09", "99942 Apophis"]]
         });
 
-        let results = sbdb::parse_cad_response(&data, "Earth").unwrap();
+        let results = sbdb::parse_cad_response(&data, Some("Earth")).unwrap();
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].designation, "99942");
-        assert_eq!(results[0].sb_name, "99942 Apophis");
+        assert_eq!(results[0].designation, Some("99942".to_owned()));
+        assert_eq!(results[0].sb_name, Some("99942 Apophis".to_owned()));
         assert_eq!(results[0].jpl_orbit_id, "220");
         assert_eq!(results[0].nominal_distance_au, 0.000254);
         assert_eq!(results[0].time_uncertainty.as_deref(), Some("< 00:01"));
@@ -30,15 +31,130 @@ mod sbdb_api_tests {
             "data": [["99942", "220", "2462240.407", "2029-Apr-13 21:46", "0.000254", "0.000253", "0.000255", "7.4225", "5.84", "< 00:01", "Earth", "19.09", "99942 Apophis"]]
         });
 
-        let results = sbdb::parse_cad_response(&data, "ALL").unwrap();
+        let results = sbdb::parse_cad_response(&data, Some("ALL")).unwrap();
         assert_eq!(results[0].encounter_body, "Earth");
-        assert_eq!(results[0].sb_name, "99942 Apophis");
+        assert_eq!(results[0].sb_name, Some("99942 Apophis".to_owned()));
     }
 
     #[test]
     fn accepts_empty_close_approach_response() {
         let data = serde_json::json!({"count": 0});
-        assert!(sbdb::parse_cad_response(&data, "Earth").unwrap().is_empty());
+        assert!(sbdb::parse_cad_response(&data, Some("Earth")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn follows_the_field_layout_from_the_cad_response() {
+        let data = serde_json::json!({
+            "count": 1,
+            "fields": ["fullname", "v_rel", "dist_max", "des", "jd", "orbit_id", "cd", "dist", "t_sigma_f", "dist_min"],
+            "data": [["99942 Apophis", "7.4225", "0.000255", "99942", "2462240.407", "220", "2029-Apr-13 21:46", "0.000254", "< 00:01", "0.000253"]]
+        });
+
+        let results = sbdb::parse_cad_response(&data, Some("Earth")).unwrap();
+        assert_eq!(results[0].designation.as_deref(), Some("99942"));
+        assert_eq!(results[0].relative_velocity_km_s, 7.4225);
+        assert_eq!(results[0].nominal_distance_au, 0.000254);
+    }
+
+    #[test]
+    fn parses_sbdb_close_approach_objects() {
+        let data = serde_json::json!({
+            "ca_data": [{
+                "body": "Earth",
+                "orbit_ref": "220",
+                "jd": "2462240.407",
+                "cd": "2029-Apr-13 21:46",
+                "dist": "0.000254",
+                "dist_min": "0.000253",
+                "dist_max": "0.000255",
+                "v_rel": "7.4225",
+                "sigma_tf": "< 00:01"
+            }]
+        });
+
+        let results = sbdb::parse_sbdb_close_approaches(&data).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].encounter_body, "Earth");
+        assert_eq!(results[0].relative_velocity_km_s, 7.4225);
+    }
+
+    #[test]
+    #[ignore = "This test requires a database migration and is not run by default."]
+    fn migrates_an_existing_database_without_losing_bodies() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE celestial_bodies (
+                id INTEGER PRIMARY KEY,
+                spk_id TEXT UNIQUE NOT NULL,
+                des TEXT,
+                fullname TEXT,
+                kind TEXT,
+                neo BOOLEAN,
+                pha BOOLEAN,
+                orbit_class_code TEXT,
+                orbit_class_name TEXT,
+                source TEXT,
+                soln_date TEXT,
+                epoch_jd REAL,
+                eccentricity REAL,
+                semi_major_axis_au REAL,
+                inclination_deg REAL,
+                long_asc_node_deg REAL,
+                arg_perihelion_deg REAL,
+                mean_anomaly_deg REAL,
+                diameter_km REAL,
+                gm_km3_s2 REAL,
+                h_magnitude REAL,
+                raw_json TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO celestial_bodies (id, spk_id, raw_json)
+            VALUES (2000433, '2000433', '{}');",
+        )
+        .unwrap();
+
+        sbdb::migrate_db(&mut conn).unwrap();
+
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let bodies: i64 = conn
+            .query_row("SELECT COUNT(*) FROM celestial_bodies", [], |row| row.get(0))
+            .unwrap();
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'close_approaches'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(version, 1);
+        assert_eq!(bodies, 1);
+        assert!(table_exists);
+    }
+
+    #[test]
+    fn lists_downloaded_close_approaches_by_filter() {
+        
+         env_logger::builder()
+            .is_test(true)
+            .filter_level(log::LevelFilter::Info)
+            .try_init()
+            .ok();
+
+        let filters = sbdb::CloseApproachFilters {
+            encounter_body: Some("Earth".to_string()),
+            start_date: utils::YMD::new(2020, 1, 1),
+            end_date: utils::YMD::new(2055, 1, 1),
+            maximum_distance_au: 0.1,
+            downloaded_only: true,
+        };
+        let res = sbdb::list_downloaded_close_approaches(&filters);
+
+        assert!(res.is_ok());
+        log::info!("Downloaded close approaches: {:?}", res.unwrap().len());
     }
 }
 

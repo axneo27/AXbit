@@ -6,6 +6,34 @@ use crate::modules::{projection_3d::{simulation, state::{StateVector, Vec3d}}, s
 use std::write;
 use std::format;
 
+pub fn json_string_field(object: &serde_json::Value, field: &str) -> anyhow::Result<String> {
+    object
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| anyhow::anyhow!("missing or invalid '{}'", field))
+}
+
+pub fn optional_json_string_field(object: &serde_json::Value, field: &str) -> Option<String> {
+    object
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+pub fn optional_json_f64_field(object: &serde_json::Value, field: &str) -> Option<f64> {
+    object.get(field).and_then(|value| {
+        value
+            .as_f64()
+            .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
+    })
+}
+
+pub fn json_f64_field(object: &serde_json::Value, field: &str) -> anyhow::Result<f64> {
+    optional_json_f64_field(object, field)
+        .ok_or_else(|| anyhow::anyhow!("missing or invalid '{}'", field))
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct YMD {
     pub year: i32,
