@@ -739,7 +739,7 @@ mod tests {
     }
 
     #[test]
-    fn deletes_and_recreates_kernel_directory() {
+    fn deletes_kernel_directory() {
         let root = std::env::temp_dir().join(format!(
             "axbit-delete-all-test-{}-{}",
             std::process::id(),
@@ -753,9 +753,7 @@ mod tests {
 
         delete_kernel_directory_contents(&root).unwrap();
 
-        assert!(root.is_dir());
-        assert!(fs::read_dir(&root).unwrap().next().is_none());
-        fs::remove_dir_all(root).unwrap();
+        assert!(!root.exists());
     }
 
     #[test]

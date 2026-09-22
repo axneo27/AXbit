@@ -766,9 +766,15 @@ impl KernelSetupState {
                     .fill(WARNING_BANNER_FILL)
                     .inner_margin(10.0)
                     .show(ui, |ui| {
-                        ui.heading("Kernel data is required before AXbit can start");
-                        ui.label("Download the base and inner-solar-system kernels, then start the simulation.");
-                        if ui.button("Download required kernels").clicked() {
+                        ui.heading("Recommended kernels are not installed");
+                        ui.label("Install the base and inner-solar-system kernels, then start the simulation.");
+                        if ui.add(
+                            egui::Button::new(
+                                egui::RichText::new("Install recommended kernels").strong()
+                            )
+                            .fill(egui::Color32::from_rgb(45, 95, 65))
+                            .min_size(egui::vec2(220.0, 34.0))
+                        ).clicked() {
                             download_required_clicked = true;
                         }
                     });
