@@ -16,8 +16,8 @@ use super::state::{StateVector, StateAtEpoch, Vec3d};
 
 const EPS: f64 = 1e-12;
 const STUMPF_C_MAX_ITER: usize = 30;
-// const C_LIGHT: f64 = 299_792.458; // km/s
-// const ONE_C2: f64 = 1.0 / (C_LIGHT * C_LIGHT); // 1/c^2, for relativity corrections
+const C_LIGHT: f64 = 299_792.458; // km/s
+const ONE_C2: f64 = 1.0 / (C_LIGHT * C_LIGHT); // 1/c^2, for relativity corrections
 
 // Lookup table for 1/k!:
 const FACTORIAL_INV: [f64; 20] = [
@@ -491,10 +491,9 @@ impl Integrator {
 			let r_vec = state_at_epoch.state.position - body_pos;
 
 			let grav_acc = Self::grav_acceleration(mu, r_vec);
+			let relativistic_correction = Self::rel_correction_acceleration(mu, state_at_epoch.state);
 
-			total_acc[0] += grav_acc[0];
-			total_acc[1] += grav_acc[1];
-			total_acc[2] += grav_acc[2];
+			total_acc += grav_acc + relativistic_correction;
 		}
 		total_acc
 	}
@@ -1247,20 +1246,35 @@ impl Integrator {
 
 	pub fn grav_acceleration(mu: f64, r: Vec3d) -> Vec3d {
 		let r2 = r.magnitude2();
-		-mu * r / (r2 * r2.sqrt())
+		let inv_r3 = 1.0 / (r2 * r2.sqrt());
+		r * (-mu * inv_r3)
 	}
 
 	// TODO all of this
-	/// Acceleration due to relativistic correction (Einstein–Infeld–Hoffmann equations)
-	pub fn rel_correction_acceleration() -> Vec3d {
-		todo!()
+	
+	/// Acceleration due to relativistic correction (Schwarzschild 1PN relativistic acceleration)
+	pub fn rel_correction_acceleration(mu: f64, state: StateVector) -> Vec3d {
+		let r = state.position;
+		let v = state.velocity;
+		let dot_r_v = r.dot(v);
+		let r2 = r.magnitude2();
+		let v2 = v.magnitude2();
+		let mu4_over_c2 = 4.0 * mu * ONE_C2;
+
+		let first_term = -mu/(r2) * (1.0 - mu4_over_c2/r2.sqrt() + v2/ONE_C2);
+		let second_term = (mu4_over_c2 / r2) * dot_r_v;
+
+		Vec3d {
+			x: first_term * r.x + second_term * v.x,
+			y: first_term * r.y + second_term * v.y,
+			z: first_term * r.z + second_term * v.z,
+		}
 	}	
 
 	pub fn spherical_harmonics_acceleration() -> Vec3d {
 		todo!()
 	}
 
-	/// Acceleration due to solar radiation pressure
 	pub fn solar_radiation_pressure_acceleration() -> Vec3d {
 		todo!()
 	}

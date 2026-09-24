@@ -31,7 +31,7 @@ tobj = "4.0.3"
 wgpu = "27.0.1"
 winit = "0.30.12"
 ode_solvers = "0.6.2"
-nalgebra = "0.34.2"
+nalgebra = { version = "0.34.2", features = ["libm-force"] }
 reqwest = { version = "0.11", features = ["blocking", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -43,6 +43,7 @@ toml = "0.8"
 thiserror = "2.0"
 url = "2.5"
 cargo-packager-resource-resolver = { version = "0.1.2", features = ["auto-detect-format"], optional = true }
+libm = "0.2.16"
 
 [features]
 packaged = ["dep:cargo-packager-resource-resolver"]
